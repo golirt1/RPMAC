@@ -41,7 +41,21 @@ RPMac has **not** been tested on any other Mac model yet. That said, it is built
 - **T2 Macs (2018-2020)** use the `flt` value format, which is implemented but **not yet verified**.
 - If the SMC does not respond with plausible values, RPMac **automatically stays read-only** and writes nothing.
 
-Reports (working or not) from other Intel Macs are very welcome — please open an issue.
+## Help us test it
+
+RPMac has only been verified on one Mac, so **we would really appreciate your help confirming whether it works on yours** — whether it works *or not*. Every report helps build a reliable compatibility list.
+
+Please **open an issue** with:
+
+- **Mac model and year** (e.g. "MacBook Pro 15-inch, 2015")
+- **Model identifier** (e.g. `MacPro6,1`) — find it in macOS under Apple menu > About This Mac > System Report, or on Windows in System Information
+- **CPU and GPU** (e.g. Intel Core i7, AMD Radeon)
+- **Number of fans** RPMac detected
+- **Windows version**
+- **What worked / what didn't** — did fan control (Auto / Max / custom RPM) work? Were the temperatures correct?
+- Any error messages or odd readings (a screenshot is great)
+
+Even a quick "works fine on my iMac 2017" is hugely valuable. Thank you!
 
 ## How it works
 RPMac uses the public Apple SMC protocol (the same one documented in the Linux `applesmc` driver) over the SMC's I/O ports (`DATA = 0x300`, `CMD = 0x304`), via the InpOut32 ring-0 I/O bridge. It reads and writes standard SMC keys (`FNum`, `F<n>Tg`, `FS! `, temperature `T...` keys) and auto-detects each key's data type (`fpe2`, `flt`, `ui*`, `sp*`, ...).
