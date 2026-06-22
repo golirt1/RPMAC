@@ -1,0 +1,47 @@
+==========================================================
+  FAN CONTROL - Control de ventilador para Mac en Boot Camp
+==========================================================
+
+QUE ES
+------
+Herramienta propia (codigo abierto) para controlar el ventilador
+de un Mac Pro 2013 desde Windows, sin depender de Macs Fan Control.
+Habla directamente con el SMC del Mac usando el protocolo publico
+de applesmc.c (kernel Linux) a traves de InpOut32.
+
+ARCHIVOS
+--------
+- smcfan.exe        Programa principal. Modos: max / auto / read
+- inpout32.dll      Puente de I/O (debe estar SIEMPRE junto a smcfan.exe)
+- Ventilador_MAX.cmd    Pone el ventilador al maximo ahora
+- Ventilador_AUTO.cmd   Devuelve el ventilador al modo automatico
+- smcfan.cs / smcread.cs   Codigo fuente
+- setup_fanmax.ps1  Script que crea la tarea de inicio
+- *.log / *.txt     Registros de pruebas
+
+USO RAPIDO  (clic derecho -> "Ejecutar como administrador")
+----------
+- Maximo ahora .......... Ventilador_MAX.cmd
+- Volver a automatico .... Ventilador_AUTO.cmd
+
+ARRANQUE AUTOMATICO
+-------------------
+Hay una tarea programada llamada "FanMax" que ejecuta
+   smcfan.exe max
+15 segundos despues de encender Windows, y la reaplica cada 5 min.
+Asi el ventilador queda al maximo desde el arranque.
+
+IMPORTANTE
+----------
+- NO muevas ni borres esta carpeta: la tarea de inicio apunta aqui.
+  Si la mueves, el arranque automatico dejara de funcionar.
+- Un apagado TOTAL resetea el SMC; la tarea lo vuelve a poner al
+  maximo en el siguiente arranque.
+- Tener el ventilador al maximo siempre es seguro, pero genera mas
+  ruido, polvo y desgaste del cojinete con el tiempo.
+
+PARA DESACTIVAR TODO
+--------------------
+1. Ejecuta Ventilador_AUTO.cmd (como administrador).
+2. Abre el Programador de tareas de Windows, busca "FanMax" y
+   eliminala.

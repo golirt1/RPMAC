@@ -1,0 +1,7 @@
+# Build output
+build/
+*.exe
+*.log
+
+# Keep the bundled dependency (MIT)
+!third_party/InpOut32/inpout32.dll
