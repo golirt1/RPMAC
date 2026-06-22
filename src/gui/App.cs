@@ -80,7 +80,8 @@ namespace RPMac {
             public TextBlock Rpm, Info, Mode;
             public Slider Slider;
             public TextBlock SliderVal;
-            public Border Auto, MaxBtn, Manual, BarFill;
+            public Border Auto, MaxBtn, Manual, BarFill, Apply;
+            public UIElement ManualRow;
         }
 
         readonly List<FanUi> fans = new List<FanUi>();
@@ -93,6 +94,8 @@ namespace RPMac {
         TextBlock status;
         volatile bool running = true;
         const double BAR_W = 404;
+        System.Windows.Forms.NotifyIcon tray;
+        bool quitting = false;
 
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int val, int size);
 
@@ -105,6 +108,7 @@ namespace RPMac {
             TextOptions.SetTextFormattingMode(this, TextFormattingMode.Ideal);
 
             try { Resources.MergedDictionaries.Add((ResourceDictionary)XamlReader.Parse(STYLES)); } catch { }
+            Settings.Load();
 
             // barra de titulo oscura
             SourceInitialized += delegate {
@@ -149,7 +153,14 @@ namespace RPMac {
             BuildTempsCard(stack);
             BuildSettingsCard(stack);
 
-            Loaded += delegate { StartRefresh(); };
+            Loaded += delegate {
+                SetupTray();
+                ApplySaved();
+                StartRefresh();
+                if (Settings.StartMinimized) HideToTray();
+            };
+            StateChanged += delegate { if (WindowState == WindowState.Minimized) HideToTray(); };
+            Closing += delegate (object s2, System.ComponentModel.CancelEventArgs e2) { if (!quitting) { e2.Cancel = true; HideToTray(); } };
             Closed += delegate { running = false; };
         }
 
@@ -186,7 +197,10 @@ namespace RPMac {
             f.Auto.Background = (mode == "auto") ? ACCENT : CHIP;
             f.MaxBtn.Background = (mode == "max") ? RED : CHIP;
             f.Manual.Background = (mode == "manual") ? ACCENT : CHIP;
-            f.Slider.IsEnabled = (mode == "manual");
+            bool man = (mode == "manual");
+            f.Slider.IsEnabled = man;
+            if (f.ManualRow != null) f.ManualRow.Visibility = man ? Visibility.Visible : Visibility.Collapsed;
+            if (f.Apply != null) f.Apply.Visibility = man ? Visibility.Visible : Visibility.Collapsed;
             f.Mode.Text = mode == "auto" ? "Mode: automatic" : mode == "max" ? "Mode: maximum" : "Mode: manual";
         }
 
@@ -213,8 +227,8 @@ namespace RPMac {
                 col.Children.Add(f.Info);
 
                 var chips = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 12) };
-                f.Auto = Chip("Auto", CHIP, TXT, delegate { if (!Guard()) return; Smc.SetFanAuto(f.Index); SetMode(f, "auto"); });
-                f.MaxBtn = Chip("Max", CHIP, TXT, delegate { if (!Guard()) return; Smc.SetFanMax(f.Index); SetMode(f, "max"); });
+                f.Auto = Chip("Auto", CHIP, TXT, delegate { if (!Guard()) return; Smc.SetFanAuto(f.Index); SetMode(f, "auto"); Settings.SetFan(f.Index, "auto", 0); });
+                f.MaxBtn = Chip("Max", CHIP, TXT, delegate { if (!Guard()) return; Smc.SetFanMax(f.Index); SetMode(f, "max"); Settings.SetFan(f.Index, "max", 0); });
                 f.Manual = Chip("Manual", CHIP, TXT, delegate { if (!Guard()) return; SetMode(f, "manual"); });
                 chips.Children.Add(f.Auto); chips.Children.Add(f.MaxBtn); chips.Children.Add(f.Manual);
                 col.Children.Add(chips);
@@ -228,11 +242,13 @@ namespace RPMac {
                 manualRow.Children.Add(f.Slider);
                 manualRow.Children.Add(f.SliderVal);
                 col.Children.Add(manualRow);
+                f.ManualRow = manualRow;
 
-                var apply = Chip("Apply RPM", ACCENT, Brushes.White, delegate { if (!Guard()) return; Smc.SetFanRpm(f.Index, f.Slider.Value); SetMode(f, "manual"); });
+                var apply = Chip("Apply RPM", ACCENT, Brushes.White, delegate { if (!Guard()) return; Smc.SetFanRpm(f.Index, f.Slider.Value); SetMode(f, "manual"); Settings.SetFan(f.Index, "manual", (int)f.Slider.Value); });
                 apply.Margin = new Thickness(0, 12, 0, 0);
                 apply.HorizontalAlignment = HorizontalAlignment.Left;
                 col.Children.Add(apply);
+                f.Apply = apply;
 
                 if (!Smc.WritesAllowed) { f.Auto.Opacity = 0.45; f.MaxBtn.Opacity = 0.45; f.Manual.Opacity = 0.45; apply.Opacity = 0.45; }
 
@@ -331,7 +347,78 @@ namespace RPMac {
             row.Children.Add(labels);
             col.Children.Add(row);
 
+            var row2 = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 14, 0, 0) };
+            var labels2 = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            labels2.Children.Add(new TextBlock { Text = "Start minimized to tray", Foreground = TXT, FontSize = 13, FontWeight = FontWeights.SemiBold });
+            labels2.Children.Add(new TextBlock { Text = "Launch hidden in the system tray (next to the clock).", Foreground = SUB, FontSize = 11, Margin = new Thickness(0, 2, 0, 0) });
+            var toggle2 = BuildToggle(Settings.StartMinimized, delegate (bool on) {
+                Settings.StartMinimized = on; Settings.Save();
+                status.Text = on ? "Start minimized: on" : "Start minimized: off";
+            });
+            DockPanel.SetDock(toggle2, Dock.Right);
+            row2.Children.Add(toggle2);
+            row2.Children.Add(labels2);
+            col.Children.Add(row2);
+
             parent.Children.Add(Card(col));
+        }
+
+        // ---- System tray ----
+        void SetupTray() {
+            try {
+                tray = new System.Windows.Forms.NotifyIcon();
+                tray.Icon = MakeIcon();
+                tray.Text = "RPMac";
+                tray.Visible = true;
+                tray.DoubleClick += delegate { ShowFromTray(); };
+                var menu = new System.Windows.Forms.ContextMenuStrip();
+                menu.Items.Add("Open", null, delegate { ShowFromTray(); });
+                menu.Items.Add("Quit", null, delegate { QuitApp(); });
+                tray.ContextMenuStrip = menu;
+            } catch { }
+        }
+        void ShowFromTray() { Show(); WindowState = WindowState.Normal; ShowInTaskbar = true; Activate(); }
+        void HideToTray() { Hide(); ShowInTaskbar = false; }
+        void QuitApp() {
+            quitting = true;
+            try { if (tray != null) tray.Visible = false; } catch { }
+            running = false;
+            System.Windows.Application.Current.Shutdown();
+        }
+        System.Drawing.Icon MakeIcon() {
+            try {
+                var bmp = new System.Drawing.Bitmap(32, 32);
+                using (var g = System.Drawing.Graphics.FromImage(bmp)) {
+                    g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                    g.Clear(System.Drawing.Color.Transparent);
+                    using (var br = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(10, 132, 255)))
+                        g.FillEllipse(br, 1, 1, 30, 30);
+                    using (var f = new System.Drawing.Font("Segoe UI", 13, System.Drawing.FontStyle.Bold))
+                    using (var wb = new System.Drawing.SolidBrush(System.Drawing.Color.White)) {
+                        var sf = new System.Drawing.StringFormat {
+                            Alignment = System.Drawing.StringAlignment.Center,
+                            LineAlignment = System.Drawing.StringAlignment.Center
+                        };
+                        g.DrawString("R", f, wb, new System.Drawing.RectangleF(0, 0, 32, 32), sf);
+                    }
+                }
+                return System.Drawing.Icon.FromHandle(bmp.GetHicon());
+            } catch { return System.Drawing.SystemIcons.Application; }
+        }
+
+        // Aplica al abrir la última configuración guardada (si es seguro escribir)
+        void ApplySaved() {
+            if (!Smc.WritesAllowed) return;
+            foreach (var f in fans) {
+                if (!Settings.Fans.ContainsKey(f.Index)) continue;
+                var s = Settings.Fans[f.Index];
+                string mode = s[0]; int rpm = 0; int.TryParse(s[1], out rpm);
+                try {
+                    if (mode == "max") { Smc.SetFanMax(f.Index); SetMode(f, "max"); }
+                    else if (mode == "manual") { Smc.SetFanRpm(f.Index, rpm); f.Slider.Value = rpm; SetMode(f, "manual"); }
+                    else { Smc.SetFanAuto(f.Index); SetMode(f, "auto"); }
+                } catch { }
+            }
         }
 
         void StartRefresh() {
@@ -373,6 +460,35 @@ namespace RPMac {
                 if (!double.IsNaN(kv.Value) && labels.TryGetValue(kv.Key, out t)) t.Text = string.Format("{0:0.0} °C", kv.Value);
             }
         }
+    }
+
+    // Guarda/lee la configuración (modo por ventilador + iniciar minimizado) en %APPDATA%\RPMac
+    static class Settings {
+        static readonly string Dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RPMac");
+        static readonly string FilePath = System.IO.Path.Combine(Dir, "config.txt");
+        public static Dictionary<int, string[]> Fans = new Dictionary<int, string[]>();
+        public static bool StartMinimized = false;
+
+        public static void Load() {
+            try {
+                if (!System.IO.File.Exists(FilePath)) return;
+                foreach (var line in System.IO.File.ReadAllLines(FilePath)) {
+                    var s = line.Split('|');
+                    if (s.Length >= 2 && s[0] == "min") StartMinimized = (s[1] == "1");
+                    else if (s.Length >= 4 && s[0] == "fan") { int idx; if (int.TryParse(s[1], out idx)) Fans[idx] = new string[] { s[2], s[3] }; }
+                }
+            } catch { }
+        }
+        public static void Save() {
+            try {
+                if (!System.IO.Directory.Exists(Dir)) System.IO.Directory.CreateDirectory(Dir);
+                var lines = new List<string>();
+                lines.Add("min|" + (StartMinimized ? "1" : "0"));
+                foreach (var kv in Fans) lines.Add("fan|" + kv.Key + "|" + kv.Value[0] + "|" + kv.Value[1]);
+                System.IO.File.WriteAllLines(FilePath, lines.ToArray());
+            } catch { }
+        }
+        public static void SetFan(int idx, string mode, int rpm) { Fans[idx] = new string[] { mode, rpm.ToString() }; Save(); }
     }
 
     static class Startup {
