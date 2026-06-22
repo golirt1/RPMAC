@@ -157,11 +157,12 @@ namespace RPMac {
                 SetupTray();
                 ApplySaved();
                 StartRefresh();
+                Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerChange;
                 if (Settings.StartMinimized) HideToTray();
             };
             StateChanged += delegate { if (WindowState == WindowState.Minimized) HideToTray(); };
             Closing += delegate (object s2, System.ComponentModel.CancelEventArgs e2) { if (!quitting) { e2.Cancel = true; HideToTray(); } };
-            Closed += delegate { running = false; };
+            Closed += delegate { running = false; try { Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerChange; } catch { } };
         }
 
         Border Card(UIElement content) {
@@ -419,6 +420,20 @@ namespace RPMac {
                     else { Smc.SetFanAuto(f.Index); SetMode(f, "auto"); }
                 } catch { }
             }
+        }
+
+        // Al reanudar de suspension/hibernacion el SMC suele perder el modo forzado
+        // (los ventiladores vuelven a automatico sin avisar). Reaplicamos la config guardada.
+        void OnPowerChange(object s, Microsoft.Win32.PowerModeChangedEventArgs e) {
+            if (e.Mode != Microsoft.Win32.PowerModes.Resume) return;
+            new Thread(delegate () {
+                Thread.Sleep(3000); // dar tiempo a que el SMC se estabilice tras reanudar
+                try { Dispatcher.Invoke((Action)delegate {
+                    if (!running) return;
+                    ApplySaved();
+                    status.Text = "Resumed — settings reapplied · " + DateTime.Now.ToString("HH:mm:ss");
+                }); } catch { }
+            }) { IsBackground = true }.Start();
         }
 
         void StartRefresh() {

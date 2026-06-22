@@ -83,10 +83,20 @@ namespace RPMac {
         static long IntBE(byte[] b, int n) { long v = UintBE(b, n); long s = 1L << (n * 8 - 1); if ((v & s) != 0) v -= (1L << (n * 8)); return v; }
         static int Hex(char c) { if (c >= '0' && c <= '9') return c - '0'; if (c >= 'a' && c <= 'f') return c - 'a' + 10; if (c >= 'A' && c <= 'F') return c - 'A' + 10; return 0; }
 
+        // El tipo y la longitud de una clave SMC nunca cambian, asi que se cachean:
+        // evita un GET_KEY_TYPE por cada lectura (mitad de trafico SMC) -> menos parpadeo
+        // y menos "lecturas no plausibles" en SMCs lentos. Acceso serializado por 'gate'.
+        struct KeyMeta { public int Len; public string Type; }
+        static readonly Dictionary<string, KeyMeta> keyCache = new Dictionary<string, KeyMeta>();
+
         static bool KeyInfo(string key, out int len, out string type) {
+            KeyMeta m;
+            if (keyCache.TryGetValue(key, out m)) { len = m.Len; type = m.Type; return true; }
             byte[] info = new byte[6];
             int r = ReadSmc(GET_KEY_TYPE, K(key), info, 6);
-            len = info[0]; type = Encoding.ASCII.GetString(info, 1, 4); return r == 0;
+            len = info[0]; type = Encoding.ASCII.GetString(info, 1, 4);
+            if (r == 0) keyCache[key] = new KeyMeta { Len = len, Type = type }; // solo cachear exitos
+            return r == 0;
         }
         static double Decode(string type, byte[] b, int len) {
             string t = type.TrimEnd('\0', ' ');
