@@ -1,5 +1,5 @@
-﻿// Fan Control Open - GUI (WPF, codigo puro, tema oscuro moderno)
-// Copyright (C) 2026 - GPL-2.0-only. Ver LICENSE y NOTICE.
+﻿// RPMac - GUI (WPF, codigo puro, tema oscuro moderno)
+// Copyright (C) 2026 golirt1 - GPL-2.0-only. Ver LICENSE y NOTICE.
 
 using System;
 using System.Collections.Generic;

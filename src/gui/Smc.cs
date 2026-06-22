@@ -1,5 +1,5 @@
-﻿// Fan Control Open - libreria del nucleo SMC (reutilizable por la GUI)
-// Copyright (C) 2026 - GPL-2.0-only
+﻿// RPMac - libreria del nucleo SMC (reutilizable por la GUI)
+// Copyright (C) 2026 golirt1 - GPL-2.0-only
 // Derivado de applesmc.c (Boichat, Rydberg) / smcFanControl (Holtmann). Ver LICENSE y NOTICE.
 
 using System;
