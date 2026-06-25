@@ -131,8 +131,16 @@ namespace RPMac {
         public static string HardwareName = "";
         public static string SafetyReason = "Not validated yet.";
 
-        // Valida que (1) sea una Mac de Apple y (2) el SMC responda de forma coherente.
-        // Si algo no cuadra, deja la app en SOLO LECTURA (no escribe nada).
+        // Valida que el hardware sea una Mac antes de permitir escribir. Si algo no
+        // cuadra, deja la app en SOLO LECTURA (no escribe nada).
+        //
+        // La PRUEBA definitiva es el propio SMC: la app le habla por los puertos de E/S
+        // 0x300/0x304 con el protocolo propietario de Apple. Un PC genérico no responde
+        // a ese protocolo con un conteo de ventiladores coherente (1-8) ni con RPMs
+        // plausibles, así que un SMC válido ES hardware Apple. Las cadenas del registro
+        // (SystemManufacturer / SystemProductName) son solo una señal secundaria: en las
+        // Macs antiguas con Boot Camp en modo BIOS/CSM (Mac Pro 3,1 y similares) vienen
+        // vacías o sin "Apple"/"Mac", por eso NO deben bloquear el control por sí solas.
         public static bool Validate() {
             string mfg = "", prod = "";
             try {
@@ -149,15 +157,11 @@ namespace RPMac {
 
             HardwareName = (mfg + " " + prod).Trim();
 
-            // SystemProductName es "Mac Pro", "MacBook Pro", "iMac", etc. — fiable en todos los Boot Camp
-            bool isApple = mfg.IndexOf("Apple", StringComparison.OrdinalIgnoreCase) >= 0
-                        || prod.IndexOf("Mac", StringComparison.OrdinalIgnoreCase) >= 0;
+            // Señal secundaria: el registro a veces confirma "Apple"/"Mac", pero no siempre.
+            bool registrySaysApple = mfg.IndexOf("Apple", StringComparison.OrdinalIgnoreCase) >= 0
+                                  || prod.IndexOf("Mac", StringComparison.OrdinalIgnoreCase) >= 0;
 
-            if (!isApple) {
-                WritesAllowed = false;
-                SafetyReason = "Not an Apple Mac (manufacturer: '" + (mfg == "" ? "(empty)" : mfg) + "', product: '" + (prod == "" ? "(empty)" : prod) + "'). Read-only for safety.";
-                return false;
-            }
+            // Prueba primaria y autoritativa: el SMC de Apple debe responder coherentemente.
             lock (gate) {
                 double n = ReadNum("FNum");
                 if (double.IsNaN(n) || n < 1 || n > 8) {
@@ -174,8 +178,12 @@ namespace RPMac {
                     return false;
                 }
             }
+
+            // SMC coherente -> es hardware Apple, aunque el registro no lo confirme.
             WritesAllowed = true;
-            SafetyReason = "Apple Mac detected, SMC valid. Control enabled.";
+            SafetyReason = registrySaysApple
+                ? "Apple Mac detected, SMC valid. Control enabled."
+                : "SMC valid (Apple hardware confirmed by the SMC; registry id '" + (HardwareName == "" ? "(empty)" : HardwareName) + "' unrecognized). Control enabled.";
             return true;
         }
 
