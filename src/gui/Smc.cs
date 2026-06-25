@@ -147,25 +147,15 @@ namespace RPMac {
                 }
             } catch { }
 
-            // Fallback: SystemBiosVersion es REG_MULTI_SZ y contiene "Apple" en todos los Boot Camp
-            if (mfg.IndexOf("Apple", StringComparison.OrdinalIgnoreCase) < 0) {
-                try {
-                    using (var k = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System")) {
-                        if (k != null) {
-                            string[] lines = k.GetValue("SystemBiosVersion") as string[];
-                            if (lines != null)
-                                foreach (var line in lines)
-                                    if (line.IndexOf("Apple", StringComparison.OrdinalIgnoreCase) >= 0) { mfg = "Apple Inc."; break; }
-                        }
-                    }
-                } catch { }
-            }
-
             HardwareName = (mfg + " " + prod).Trim();
 
-            if (mfg.IndexOf("Apple", StringComparison.OrdinalIgnoreCase) < 0) {
+            // SystemProductName es "Mac Pro", "MacBook Pro", "iMac", etc. — fiable en todos los Boot Camp
+            bool isApple = mfg.IndexOf("Apple", StringComparison.OrdinalIgnoreCase) >= 0
+                        || prod.IndexOf("Mac", StringComparison.OrdinalIgnoreCase) >= 0;
+
+            if (!isApple) {
                 WritesAllowed = false;
-                SafetyReason = "Not an Apple Mac (BIOS manufacturer: '" + (mfg == "" ? "(empty)" : mfg) + "'). Read-only for safety.";
+                SafetyReason = "Not an Apple Mac (manufacturer: '" + (mfg == "" ? "(empty)" : mfg) + "', product: '" + (prod == "" ? "(empty)" : prod) + "'). Read-only for safety.";
                 return false;
             }
             lock (gate) {
