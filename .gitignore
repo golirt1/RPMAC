@@ -5,3 +5,6 @@ build/
 
 # Keep the bundled dependency (MIT)
 !third_party/InpOut32/inpout32.dll
+
+# Release archives (uploaded to GitHub Releases, not committed)
+*.zip

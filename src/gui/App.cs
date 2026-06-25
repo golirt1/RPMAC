@@ -17,14 +17,47 @@ namespace RPMac {
 
     public class MainWindow : Window {
         static Brush B(string hex) { return (Brush)new BrushConverter().ConvertFromString(hex); }
-        static readonly Brush BG     = B("#1B1B1F");
-        static readonly Brush CARD   = B("#27272C");
-        static readonly Brush TXT    = B("#F2F2F4");
-        static readonly Brush SUB    = B("#8E8E96");
-        static readonly Brush ACCENT = B("#0A84FF");
-        static readonly Brush RED    = B("#FF453A");
-        static readonly Brush CHIP   = B("#37373E");
-        static readonly Brush BORDER = B("#3A3A42");
+        // Paleta del tema: son brushes MUTABLES (mismo objeto, cambia .Color) para poder
+        // cambiar de tema en vivo sin reconstruir la ventana.
+        internal static readonly SolidColorBrush BG     = (SolidColorBrush)B("#1B1B1F");
+        internal static readonly SolidColorBrush CARD   = (SolidColorBrush)B("#27272C");
+        internal static readonly SolidColorBrush TXT    = (SolidColorBrush)B("#F2F2F4");
+        internal static readonly SolidColorBrush SUB    = (SolidColorBrush)B("#8E8E96");
+        internal static readonly SolidColorBrush ACCENT = (SolidColorBrush)B("#0A84FF");
+        internal static readonly SolidColorBrush RED    = (SolidColorBrush)B("#FF453A");
+        internal static readonly SolidColorBrush CHIP   = (SolidColorBrush)B("#37373E");
+        internal static readonly SolidColorBrush BORDER = (SolidColorBrush)B("#3A3A42");
+        internal static readonly SolidColorBrush BAR    = (SolidColorBrush)B("#202024"); // barra de estado
+        internal static readonly SolidColorBrush OVBG   = (SolidColorBrush)B("#E61B1B1F"); // fondo del overlay (translucido)
+
+        static void SetC(SolidColorBrush b, string hex) { b.Color = (Color)ColorConverter.ConvertFromString(hex); }
+        static bool IsDark(string t) { return t != "light" && t != "japan"; }
+
+        IntPtr hwnd = IntPtr.Zero;
+        void SetTitleBar(bool dark) {
+            try {
+                if (hwnd == IntPtr.Zero) return;
+                int on = dark ? 1 : 0;
+                DwmSetWindowAttribute(hwnd, 20, ref on, 4); // dark mode
+                DwmSetWindowAttribute(hwnd, 19, ref on, 4); // (build viejo de Win10)
+            } catch { }
+        }
+
+        // Aplica una paleta cambiando el color de los brushes compartidos -> toda la UI
+        // (ventana Y overlay) se repinta sola, porque comparten los mismos objetos brush.
+        // Orden: BG, CARD, TXT, SUB, ACCENT, RED, CHIP, BORDER, BAR, OVBG
+        void ApplyTheme(string name) {
+            string[] p;
+            switch (name) {
+                case "light":  p = new[]{ "#F2F2F7","#FFFFFF","#1B1B1F","#6E6E73","#0A84FF","#FF3B30","#E5E5EA","#D1D1D6","#E8E8ED","#F2F2F2F7" }; break;
+                case "nature": p = new[]{ "#14211A","#1E2E25","#EAF3EC","#8FB39B","#34C759","#FF6B57","#2A3D32","#34493C","#101A14","#E614211A" }; break;
+                case "japan":  p = new[]{ "#F7F3EE","#FFFFFF","#1A1416","#8A7E78","#BC002D","#BC002D","#EFE7DE","#E0D5C8","#EFE7DE","#F2F7F3EE" }; break;
+                default:       p = new[]{ "#1B1B1F","#27272C","#F2F2F4","#8E8E96","#0A84FF","#FF453A","#37373E","#3A3A42","#202024","#E61B1B1F" }; break; // dark
+            }
+            SetC(BG, p[0]); SetC(CARD, p[1]); SetC(TXT, p[2]); SetC(SUB, p[3]);
+            SetC(ACCENT, p[4]); SetC(RED, p[5]); SetC(CHIP, p[6]); SetC(BORDER, p[7]); SetC(BAR, p[8]); SetC(OVBG, p[9]);
+            SetTitleBar(IsDark(name));
+        }
 
         static readonly string[][] CURATED = new string[][] {
             new string[]{"TC0P","CPU"},
@@ -109,13 +142,13 @@ namespace RPMac {
 
             try { Resources.MergedDictionaries.Add((ResourceDictionary)XamlReader.Parse(STYLES)); } catch { }
             Settings.Load();
+            ApplyTheme(Settings.Theme); // colorea la paleta antes de construir la UI
 
-            // barra de titulo oscura
+            // barra de titulo acorde al tema
             SourceInitialized += delegate {
                 try {
-                    IntPtr h = new WindowInteropHelper(this).Handle; int on = 1;
-                    DwmSetWindowAttribute(h, 20, ref on, 4);
-                    DwmSetWindowAttribute(h, 19, ref on, 4);
+                    hwnd = new WindowInteropHelper(this).Handle;
+                    SetTitleBar(IsDark(Settings.Theme));
                 } catch { }
             };
 
@@ -128,7 +161,7 @@ namespace RPMac {
             DockPanel.SetDock(header, Dock.Top);
             root.Children.Add(header);
 
-            var statusBar = new Border { Background = B("#202024"), Child = (status = new TextBlock { Text = "Starting…", FontSize = 11, Foreground = SUB, Margin = new Thickness(20, 7, 20, 7) }) };
+            var statusBar = new Border { Background = BAR, Child = (status = new TextBlock { Text = "Starting…", FontSize = 11, Foreground = SUB, Margin = new Thickness(20, 7, 20, 7) }) };
             DockPanel.SetDock(statusBar, Dock.Bottom);
             root.Children.Add(statusBar);
 
@@ -158,6 +191,7 @@ namespace RPMac {
                 ApplySaved();
                 StartRefresh();
                 Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerChange;
+                if (Settings.Overlay) ShowOverlay();
                 if (Settings.StartMinimized) HideToTray();
             };
             StateChanged += delegate { if (WindowState == WindowState.Minimized) HideToTray(); };
@@ -326,6 +360,47 @@ namespace RPMac {
             return track;
         }
 
+        readonly Dictionary<string, Border> themeChips = new Dictionary<string, Border>();
+        readonly Dictionary<string, TextBlock> themeChipLabels = new Dictionary<string, TextBlock>();
+
+        // Etiqueta visible -> clave interna del tema
+        static readonly string[][] THEMES = new string[][] {
+            new string[]{ "dark",   "Dark"   },
+            new string[]{ "light",  "Light"  },
+            new string[]{ "nature", "Nature" },
+            new string[]{ "japan",  "Japan"  },
+        };
+
+        void BuildThemeRow(Panel col) {
+            col.Children.Add(new TextBlock { Text = "Theme", Foreground = TXT, FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 16, 0, 8) });
+            var wrap = new WrapPanel { Orientation = Orientation.Horizontal };
+            foreach (var t in THEMES) {
+                string key = t[0]; string label = t[1];
+                var tb = new TextBlock { Text = label, FontSize = 13, FontWeight = FontWeights.SemiBold };
+                var bd = new Border { CornerRadius = new CornerRadius(9), Padding = new Thickness(15, 8, 15, 8), Margin = new Thickness(0, 0, 8, 8), Cursor = Cursors.Hand, Child = tb };
+                bd.MouseEnter += delegate { if (Settings.Theme != key) bd.Opacity = 0.82; };
+                bd.MouseLeave += delegate { bd.Opacity = 1.0; };
+                bd.MouseLeftButtonUp += delegate {
+                    Settings.Theme = key; Settings.Save();
+                    ApplyTheme(key);
+                    SelectThemeChips();
+                    status.Text = "Theme: " + label;
+                };
+                themeChips[key] = bd; themeChipLabels[key] = tb;
+                wrap.Children.Add(bd);
+            }
+            col.Children.Add(wrap);
+            SelectThemeChips();
+        }
+
+        void SelectThemeChips() {
+            foreach (var kv in themeChips) {
+                bool sel = (kv.Key == Settings.Theme);
+                kv.Value.Background = sel ? ACCENT : CHIP;
+                themeChipLabels[kv.Key].Foreground = sel ? Brushes.White : TXT;
+            }
+        }
+
         void BuildSettingsCard(Panel parent) {
             var col = new StackPanel();
             col.Children.Add(new TextBlock { Text = "Settings", FontSize = 15, FontWeight = FontWeights.Bold, Foreground = TXT, Margin = new Thickness(0, 0, 0, 12) });
@@ -361,7 +436,81 @@ namespace RPMac {
             row2.Children.Add(labels2);
             col.Children.Add(row2);
 
+            var row3 = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 14, 0, 0) };
+            var labels3 = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            labels3.Children.Add(new TextBlock { Text = "Show temperatures in °F", Foreground = TXT, FontSize = 13, FontWeight = FontWeights.SemiBold });
+            labels3.Children.Add(new TextBlock { Text = "Display temperatures in Fahrenheit instead of Celsius.", Foreground = SUB, FontSize = 11, Margin = new Thickness(0, 2, 0, 0) });
+            var toggle3 = BuildToggle(Settings.Fahrenheit, delegate (bool on) {
+                Settings.Fahrenheit = on; Settings.Save();
+                ReformatTemps();
+                status.Text = on ? "Temperatures: °F" : "Temperatures: °C";
+            });
+            DockPanel.SetDock(toggle3, Dock.Right);
+            row3.Children.Add(toggle3);
+            row3.Children.Add(labels3);
+            col.Children.Add(row3);
+
+            var row4 = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 14, 0, 0) };
+            var labels4 = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            labels4.Children.Add(new TextBlock { Text = "On-screen overlay", Foreground = TXT, FontSize = 13, FontWeight = FontWeights.SemiBold });
+            labels4.Children.Add(new TextBlock { Text = "Show fan RPM and temperatures on top of everything (top-right corner).", Foreground = SUB, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) });
+            var toggle4 = BuildToggle(Settings.Overlay, delegate (bool on) {
+                Settings.Overlay = on; Settings.Save();
+                if (on) ShowOverlay(); else HideOverlay();
+                status.Text = on ? "Overlay: on" : "Overlay: off";
+            });
+            DockPanel.SetDock(toggle4, Dock.Right);
+            row4.Children.Add(toggle4);
+            row4.Children.Add(labels4);
+            col.Children.Add(row4);
+
+            BuildOverlayOptions(col);
+            BuildThemeRow(col);
+
             parent.Children.Add(Card(col));
+        }
+
+        void BuildOverlayOptions(Panel col) {
+            // --- Orientacion ---
+            col.Children.Add(new TextBlock { Text = "Overlay layout", Foreground = TXT, FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 16, 0, 8) });
+            var orient = new WrapPanel { Orientation = Orientation.Horizontal };
+            var vtb = new TextBlock { Text = "Vertical", FontSize = 13, FontWeight = FontWeights.SemiBold };
+            var htb = new TextBlock { Text = "Horizontal", FontSize = 13, FontWeight = FontWeights.SemiBold };
+            var vbd = new Border { CornerRadius = new CornerRadius(9), Padding = new Thickness(15, 8, 15, 8), Margin = new Thickness(0, 0, 8, 8), Cursor = Cursors.Hand, Child = vtb };
+            var hbd = new Border { CornerRadius = new CornerRadius(9), Padding = new Thickness(15, 8, 15, 8), Margin = new Thickness(0, 0, 8, 8), Cursor = Cursors.Hand, Child = htb };
+            Action paintOrient = delegate {
+                bool h = Settings.OverlayHorizontal;
+                vbd.Background = h ? CHIP : ACCENT; vtb.Foreground = h ? TXT : Brushes.White;
+                hbd.Background = h ? ACCENT : CHIP; htb.Foreground = h ? Brushes.White : TXT;
+            };
+            vbd.MouseLeftButtonUp += delegate { Settings.OverlayHorizontal = false; Settings.Save(); if (overlay != null) { overlay.SetHorizontal(false); overlay.Reposition(); } paintOrient(); };
+            hbd.MouseLeftButtonUp += delegate { Settings.OverlayHorizontal = true; Settings.Save(); if (overlay != null) { overlay.SetHorizontal(true); overlay.Reposition(); } paintOrient(); };
+            orient.Children.Add(vbd); orient.Children.Add(hbd);
+            paintOrient();
+            col.Children.Add(orient);
+
+            // --- Que mostrar (ventiladores + sensores presentes) ---
+            var items = new List<string[]>();
+            foreach (var f in fans) items.Add(new[] { "fan" + f.Index, "Fan " + f.Index });
+            foreach (var c in CURATED) if (curatedLabels.ContainsKey(c[0])) items.Add(new[] { c[0], c[1] });
+            if (items.Count == 0) return;
+
+            col.Children.Add(new TextBlock { Text = "Show in overlay", Foreground = TXT, FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 14, 0, 8) });
+            var wrap = new WrapPanel { Orientation = Orientation.Horizontal };
+            foreach (var it in items) {
+                string key = it[0]; string label = it[1];
+                var tb = new TextBlock { Text = label, FontSize = 13, FontWeight = FontWeights.SemiBold };
+                var bd = new Border { CornerRadius = new CornerRadius(9), Padding = new Thickness(13, 7, 13, 7), Margin = new Thickness(0, 0, 8, 8), Cursor = Cursors.Hand, Child = tb };
+                Action paint = delegate { bool on = OverlaySel(key); bd.Background = on ? ACCENT : CHIP; tb.Foreground = on ? Brushes.White : TXT; };
+                bd.MouseLeftButtonUp += delegate {
+                    if (Settings.OverlayItems == null) { Settings.OverlayItems = new HashSet<string>(); foreach (var x in items) Settings.OverlayItems.Add(x[0]); }
+                    if (Settings.OverlayItems.Contains(key)) Settings.OverlayItems.Remove(key); else Settings.OverlayItems.Add(key);
+                    Settings.Save(); paint(); RefreshOverlayNow();
+                };
+                paint();
+                wrap.Children.Add(bd);
+            }
+            col.Children.Add(wrap);
         }
 
         // ---- System tray ----
@@ -461,6 +610,7 @@ namespace RPMac {
                             }
                             UpdateTemps(curated, curatedLabels);
                             if (all != null) UpdateTemps(all, allLabels);
+                            UpdateOverlay(infos, curated);
                             status.Text = "Driver OK · updated " + DateTime.Now.ToString("HH:mm:ss");
                         });
                     } catch { }
@@ -472,7 +622,170 @@ namespace RPMac {
         void UpdateTemps(Dictionary<string, double> vals, Dictionary<string, TextBlock> labels) {
             foreach (var kv in vals) {
                 TextBlock t;
-                if (!double.IsNaN(kv.Value) && labels.TryGetValue(kv.Key, out t)) t.Text = string.Format("{0:0.0} °C", kv.Value);
+                if (!double.IsNaN(kv.Value) && labels.TryGetValue(kv.Key, out t)) {
+                    t.Tag = kv.Value;            // guardamos el valor crudo en °C para poder reformatear
+                    t.Text = FormatTemp(kv.Value);
+                }
+            }
+        }
+
+        // El SMC siempre entrega °C; convertimos solo al mostrar segun la preferencia.
+        static string FormatTemp(double c) {
+            return Settings.Fahrenheit
+                ? string.Format("{0:0.0} °F", c * 9.0 / 5.0 + 32.0)
+                : string.Format("{0:0.0} °C", c);
+        }
+
+        // Reformatea las etiquetas ya visibles al cambiar C<->F (sin esperar al refresco).
+        void ReformatTemps() {
+            foreach (var t in curatedLabels.Values) if (t.Tag is double) t.Text = FormatTemp((double)t.Tag);
+            foreach (var t in allLabels.Values) if (t.Tag is double) t.Text = FormatTemp((double)t.Tag);
+        }
+
+        // ---- Overlay en pantalla (estilo FRAPS, esquina superior derecha) ----
+        Overlay overlay;
+        void ShowOverlay() {
+            if (overlay == null) overlay = new Overlay();
+            overlay.Horizontal = Settings.OverlayHorizontal;
+            overlay.Show();
+            RefreshOverlayNow();
+            overlay.Reposition();
+        }
+        void HideOverlay() { if (overlay != null) overlay.Hide(); }
+
+        // ¿Mostrar este item en el overlay? (null = todo)
+        static bool OverlaySel(string key) {
+            return Settings.OverlayItems == null || Settings.OverlayItems.Contains(key);
+        }
+
+        List<FanInfo> lastInfos;
+        Dictionary<string, double> lastCurated;
+
+        // Solo muestra sensores curados PRESENTES y con lectura plausible (los mismos de la
+        // ventana): los valores salen tal cual del SMC, asi que son lecturas reales.
+        void UpdateOverlay(List<FanInfo> infos, Dictionary<string, double> curated) {
+            lastInfos = infos; lastCurated = curated;
+            if (overlay == null || !overlay.IsVisible) return;
+            var rows = new List<string[]>();
+            foreach (var fi in infos)
+                if (!double.IsNaN(fi.Actual) && OverlaySel("fan" + fi.Index))
+                    rows.Add(new[] { "Fan " + fi.Index, ((int)fi.Actual) + " RPM" });
+            foreach (var c in CURATED) {
+                double v;
+                if (curatedLabels.ContainsKey(c[0]) && OverlaySel(c[0]) && curated.TryGetValue(c[0], out v) && !double.IsNaN(v))
+                    rows.Add(new[] { c[1], FormatTemp(v) });
+            }
+            overlay.Update(rows);
+        }
+
+        // Refresca el overlay al instante (al cambiar selección/orientación, sin esperar 2 s).
+        void RefreshOverlayNow() {
+            if (lastInfos != null && lastCurated != null) UpdateOverlay(lastInfos, lastCurated);
+        }
+    }
+
+    // Ventana sin bordes, siempre encima y "click-through" (los clics la atraviesan).
+    // Muestra RPM/temperaturas sobre cualquier app o juego, como FRAPS.
+    // Usa los brushes compartidos del tema, asi que cambia de color con el tema en vivo.
+    public class Overlay : Window {
+        readonly StackPanel panel;
+        const int GWL_EXSTYLE = -20;
+        const int WS_EX_TRANSPARENT = 0x20, WS_EX_LAYERED = 0x80000, WS_EX_TOOLWINDOW = 0x80;
+        [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int i);
+        [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr h, int i, int v);
+
+        public bool Horizontal = false;
+        List<string[]> lastRows = new List<string[]>();
+        readonly Border card;
+
+        static DropShadowEffect Shadow() {
+            return new DropShadowEffect { Color = Colors.Black, BlurRadius = 4, ShadowDepth = 0, Opacity = 0.55 };
+        }
+
+        public Overlay() {
+            WindowStyle = WindowStyle.None;
+            AllowsTransparency = true;
+            Background = Brushes.Transparent;
+            Topmost = true;
+            ShowInTaskbar = false;
+            ShowActivated = false;            // no roba el foco al juego/app
+            ResizeMode = ResizeMode.NoResize;
+            SizeToContent = SizeToContent.WidthAndHeight;
+            FontFamily = new FontFamily("Segoe UI");
+
+            panel = new StackPanel();
+
+            card = new Border {
+                Background = MainWindow.OVBG,
+                BorderBrush = MainWindow.ACCENT,
+                BorderThickness = new Thickness(1.2),
+                CornerRadius = new CornerRadius(12),
+                Padding = new Thickness(14, 10, 14, 11),
+                Effect = new DropShadowEffect { Color = Colors.Black, BlurRadius = 16, ShadowDepth = 0, Opacity = 0.45 },
+                Margin = new Thickness(10),     // hueco para que se vea la sombra
+                Child = panel
+            };
+            Content = card;
+
+            SourceInitialized += delegate {
+                try {
+                    IntPtr h = new WindowInteropHelper(this).Handle;
+                    int ex = GetWindowLong(h, GWL_EXSTYLE);
+                    SetWindowLong(h, GWL_EXSTYLE, ex | WS_EX_TRANSPARENT | WS_EX_LAYERED | WS_EX_TOOLWINDOW);
+                } catch { }
+            };
+            SizeChanged += delegate { Reposition(); };
+            Loaded += delegate { Reposition(); };
+        }
+
+        public void SetHorizontal(bool h) { Horizontal = h; Render(lastRows); }
+
+        public void Reposition() {
+            var wa = SystemParameters.WorkArea;          // siempre arriba a la derecha
+            Left = wa.Right - ActualWidth + 2;
+            Top = wa.Top + 2;
+        }
+
+        TextBlock Label(string t, double size) { return new TextBlock { Text = t, Foreground = MainWindow.SUB, FontSize = size, Effect = Shadow(), VerticalAlignment = VerticalAlignment.Center }; }
+        TextBlock Value(string t, double size) { return new TextBlock { Text = t, Foreground = MainWindow.TXT, FontSize = size, FontWeight = FontWeights.SemiBold, Effect = Shadow(), VerticalAlignment = VerticalAlignment.Center }; }
+
+        // rows: cada item es { etiqueta, valor }
+        public void Update(List<string[]> rows) { lastRows = rows; Render(rows); }
+
+        void Render(List<string[]> rows) {
+            panel.Orientation = Horizontal ? Orientation.Horizontal : Orientation.Vertical;
+            panel.MinWidth = Horizontal ? 0 : 128;
+            panel.Children.Clear();
+
+            // El modo horizontal es mas compacto (fuente menor, menos padding).
+            card.Padding = Horizontal ? new Thickness(10, 5, 10, 6) : new Thickness(12, 8, 12, 9);
+            double lblSize = Horizontal ? 10.5 : 12;
+            double valSize = Horizontal ? 11.5 : 13;
+            double dotSize = Horizontal ? 6 : 7;
+
+            // cabecera: punto de acento (+ "RPMac" solo en vertical, para no ocupar de mas)
+            var head = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = Horizontal ? new Thickness(0, 0, 12, 0) : new Thickness(0, 0, 0, 6) };
+            head.Children.Add(new Border { Width = dotSize, Height = dotSize, CornerRadius = new CornerRadius(dotSize / 2), Background = MainWindow.ACCENT, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, Horizontal ? 0.0 : 7.0, 0) });
+            if (!Horizontal) head.Children.Add(new TextBlock { Text = "RPMac", Foreground = MainWindow.TXT, FontSize = 12, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center, Effect = Shadow() });
+            panel.Children.Add(head);
+
+            foreach (var r in rows) {
+                if (Horizontal) {
+                    var item = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 11, 0) };
+                    var lbl = Label(r[0], lblSize); lbl.Margin = new Thickness(0, 0, 5, 0);
+                    item.Children.Add(lbl);
+                    item.Children.Add(Value(r[1], valSize));
+                    panel.Children.Add(item);
+                } else {
+                    var line = new DockPanel { LastChildFill = false, Margin = new Thickness(0, 1, 0, 1) };
+                    var lbl = Label(r[0], lblSize); lbl.Margin = new Thickness(0, 0, 18, 0);
+                    var val = Value(r[1], valSize);
+                    DockPanel.SetDock(lbl, Dock.Left);
+                    DockPanel.SetDock(val, Dock.Right);
+                    line.Children.Add(lbl);
+                    line.Children.Add(val);
+                    panel.Children.Add(line);
+                }
             }
         }
     }
@@ -483,6 +796,11 @@ namespace RPMac {
         static readonly string FilePath = System.IO.Path.Combine(Dir, "config.txt");
         public static Dictionary<int, string[]> Fans = new Dictionary<int, string[]>();
         public static bool StartMinimized = false;
+        public static bool Fahrenheit = false;
+        public static bool Overlay = false;
+        public static bool OverlayHorizontal = false;
+        public static HashSet<string> OverlayItems = null; // null = mostrar todo
+        public static string Theme = "dark";
 
         public static void Load() {
             try {
@@ -490,6 +808,11 @@ namespace RPMac {
                 foreach (var line in System.IO.File.ReadAllLines(FilePath)) {
                     var s = line.Split('|');
                     if (s.Length >= 2 && s[0] == "min") StartMinimized = (s[1] == "1");
+                    else if (s.Length >= 2 && s[0] == "tempf") Fahrenheit = (s[1] == "1");
+                    else if (s.Length >= 2 && s[0] == "overlay") Overlay = (s[1] == "1");
+                    else if (s.Length >= 2 && s[0] == "ovorient") OverlayHorizontal = (s[1] == "h");
+                    else if (s.Length >= 2 && s[0] == "ovsel") OverlayItems = new HashSet<string>(s[1].Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries));
+                    else if (s.Length >= 2 && s[0] == "theme") Theme = s[1];
                     else if (s.Length >= 4 && s[0] == "fan") { int idx; if (int.TryParse(s[1], out idx)) Fans[idx] = new string[] { s[2], s[3] }; }
                 }
             } catch { }
@@ -499,6 +822,11 @@ namespace RPMac {
                 if (!System.IO.Directory.Exists(Dir)) System.IO.Directory.CreateDirectory(Dir);
                 var lines = new List<string>();
                 lines.Add("min|" + (StartMinimized ? "1" : "0"));
+                lines.Add("tempf|" + (Fahrenheit ? "1" : "0"));
+                lines.Add("overlay|" + (Overlay ? "1" : "0"));
+                lines.Add("ovorient|" + (OverlayHorizontal ? "h" : "v"));
+                if (OverlayItems != null) lines.Add("ovsel|" + string.Join(",", new List<string>(OverlayItems).ToArray()));
+                lines.Add("theme|" + Theme);
                 foreach (var kv in Fans) lines.Add("fan|" + kv.Key + "|" + kv.Value[0] + "|" + kv.Value[1]);
                 System.IO.File.WriteAllLines(FilePath, lines.ToArray());
             } catch { }
