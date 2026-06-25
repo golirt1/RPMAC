@@ -1,0 +1,31 @@
+RPMac - Quick start
+===================
+
+1. Keep RPMac.exe and inpout32.dll TOGETHER in the same folder.
+2. Right-click RPMac.exe  ->  "Run as administrator"
+   (administrator rights are required to access the Mac's hardware/SMC).
+3. Set each fan to Auto / Max / a custom RPM. Temperatures update live.
+
+Requirements
+------------
+- An Intel Mac running Windows (Boot Camp).
+- On non-Apple PCs the app stays READ-ONLY and changes nothing.
+
+Antivirus note
+--------------
+RPMac uses InpOut32, a low-level I/O driver, to talk to the Mac's SMC
+(the chip that controls the fans). Some antivirus tools flag this kind of
+driver as "potentially unwanted" because it grants hardware access.
+This is normal for fan-control utilities. RPMac is fully open source:
+https://github.com/golirt1/RPMAC
+If your antivirus blocks it, allow it manually.
+
+Safety
+------
+Running the fan at maximum is safe for the hardware, but constant max speed
+means more noise and wear over time. RPMac never disables the SMC's built-in
+thermal protection.
+
+License: GPL-2.0-only. See LICENSE and NOTICE.
+
+Provided AS IS, without warranty. Use at your own risk.
