@@ -1,3 +1,20 @@
+## RPMac v1.1.0
+
+**The other app capable of controlling fans on Intel Macs in Windows — for free.**
+
+### What's new in 1.1.0
+- **On-screen overlay (FRAPS-style):** always-on-top, click-through, pinned to the top-right corner. Choose **vertical or horizontal (compact)** layout and **select which fans/sensors** to show.
+- **Themes:** Dark / Light / Nature / Japan, applied instantly (the Windows title bar follows the theme too).
+- **Temperatures in °C or °F** with a single toggle.
+- **Re-applies your fan settings after sleep/resume** (the SMC drops forced mode on resume, so fans no longer silently revert to auto).
+- Performance: SMC key info is cached to roughly halve SMC traffic per refresh.
+
+### Download
+Download `RPMac-v1.1.0-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
+Keep `RPMac.exe` and `inpout32.dll` together in the same folder.
+
+---
+
 ## RPMac v1.0.0
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**
