@@ -141,25 +141,47 @@ namespace RPMac {
                         object m = k.GetValue("SystemManufacturer"); object p = k.GetValue("SystemProductName");
                         mfg = (m == null) ? "" : m.ToString();
                         prod = (p == null) ? "" : p.ToString();
+                        // Boot Camp antiguo (2008-2010) a veces omite SystemManufacturer — intentar SystemFamily
+                        if (mfg == "") { object f = k.GetValue("SystemFamily"); if (f != null) mfg = f.ToString(); }
                     }
                 }
             } catch { }
+
+            // Fallback: SystemBiosVersion es REG_MULTI_SZ y contiene "Apple" en todos los Boot Camp
+            if (mfg.IndexOf("Apple", StringComparison.OrdinalIgnoreCase) < 0) {
+                try {
+                    using (var k = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System")) {
+                        if (k != null) {
+                            string[] lines = k.GetValue("SystemBiosVersion") as string[];
+                            if (lines != null)
+                                foreach (var line in lines)
+                                    if (line.IndexOf("Apple", StringComparison.OrdinalIgnoreCase) >= 0) { mfg = "Apple Inc."; break; }
+                        }
+                    }
+                } catch { }
+            }
+
             HardwareName = (mfg + " " + prod).Trim();
 
             if (mfg.IndexOf("Apple", StringComparison.OrdinalIgnoreCase) < 0) {
                 WritesAllowed = false;
-                SafetyReason = "Not an Apple Mac (manufacturer: " + (mfg == "" ? "unknown" : mfg) + "). Read-only for safety.";
+                SafetyReason = "Not an Apple Mac (BIOS manufacturer: '" + (mfg == "" ? "(empty)" : mfg) + "'). Read-only for safety.";
                 return false;
             }
             lock (gate) {
                 double n = ReadNum("FNum");
                 if (double.IsNaN(n) || n < 1 || n > 8) {
-                    WritesAllowed = false; SafetyReason = "SMC did not return a valid fan count. Read-only for safety."; return false;
+                    WritesAllowed = false;
+                    SafetyReason = "SMC did not return a valid fan count (got " + (double.IsNaN(n) ? "NaN" : n.ToString()) + "). Read-only for safety.";
+                    return false;
                 }
                 double ac = ReadNum("F0Ac"), mn = ReadNum("F0Mn"), mx = ReadNum("F0Mx");
+                // mn puede ser 0 en algunos modelos (el ventilador puede pararse) — solo rechazar negativo
                 if (double.IsNaN(ac) || double.IsNaN(mn) || double.IsNaN(mx) ||
-                    mn <= 0 || mx <= mn || mx > 20000 || ac < 0 || ac > 20000) {
-                    WritesAllowed = false; SafetyReason = "Fan readings are not plausible. Read-only for safety."; return false;
+                    mn < 0 || mx <= 0 || mx > 20000 || ac < 0 || ac > 20000) {
+                    WritesAllowed = false;
+                    SafetyReason = string.Format("Fan readings are not plausible (ac={0:0}, mn={1:0}, mx={2:0}). Read-only for safety.", ac, mn, mx);
+                    return false;
                 }
             }
             WritesAllowed = true;
