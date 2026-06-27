@@ -17,9 +17,90 @@ namespace RPMac {
     }
 
     public static class Smc {
+        // ---- InpOut32 / InpOutx64 (legacy I/O ports — pre-T2 Macs) ----
+        // The 32-bit DLL auto-installs the matching kernel driver (inpoutx64.sys on
+        // 64-bit Windows) and exposes the legacy SMC I/O ports 0x300/0x304.
         [DllImport("inpout32.dll")] static extern short Inp32(short port);
         [DllImport("inpout32.dll")] static extern void  Out32(short port, short data);
         [DllImport("inpout32.dll")] public static extern bool IsInpOutDriverOpen();
+
+        // ---- PawnIO (kernel MMIO mapping — T2 Macs 2018-2020) ----
+        // On T2 Macs the legacy ports return NaN; the SMC lives behind an MMIO window
+        // that only a kernel driver can map. We use PawnIO (https://pawnio.eu): a modern,
+        // EV-signed, open-source scriptable kernel driver — Defender doesn't flag it and
+        // it isn't on the vulnerable-driver blocklist (unlike WinRing0). Our signed Pawn
+        // module "AppleT2Smc" does the SMC handshake in kernel mode; we just send it the
+        // key to read/write. inpout32's own MapPhysToLin can't do this (user-mode map,
+        // blocked on modern Windows), which is why PawnIO is required for T2.
+        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
+        static extern IntPtr CreateFile(string name, uint access, uint share, IntPtr sec,
+                                        uint disp, uint flags, IntPtr templ);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool DeviceIoControl(IntPtr h, uint code, byte[] inBuf, uint inSize,
+                                           byte[] outBuf, uint outSize, out uint returned, IntPtr ov);
+        [DllImport("kernel32.dll", SetLastError = true)]
+        static extern bool CloseHandle(IntPtr h);
+
+        const uint GENERIC_RW    = 0xC0000000;   // GENERIC_READ | GENERIC_WRITE
+        const uint FILE_SHARE_RW = 0x3;
+        const uint OPEN_EXISTING = 0x3;
+        const string PAWNIO_DEVICE = @"\\?\GLOBALROOT\Device\PawnIO";
+        // IOCTL codes (from LibreHardwareMonitor's PawnIo.cs)
+        const uint PIO_DEVICE_TYPE = 41394u << 16;
+        const uint PIO_LOAD_BINARY = PIO_DEVICE_TYPE | (0x821u << 2);
+        const uint PIO_EXECUTE_FN  = PIO_DEVICE_TYPE | (0x841u << 2);
+        const int  PIO_FN_NAME_LEN = 32;
+        const string T2_MODULE_FILE = "AppleT2Smc.bin"; // signed PawnIO module, next to the exe
+
+        static bool   useMmio = false;
+        static IntPtr pawnHandle = IntPtr.Zero;
+        public static bool MmioActive { get { return useMmio; } }
+
+        // Open PawnIO and load our signed T2 SMC module. Returns true on success.
+        static bool TryInitMmio() {
+            try {
+                string dir = System.IO.Path.GetDirectoryName(
+                    System.Reflection.Assembly.GetExecutingAssembly().Location);
+                string modPath = System.IO.Path.Combine(dir, T2_MODULE_FILE);
+                if (!System.IO.File.Exists(modPath)) return false; // module not bundled yet
+
+                IntPtr h = CreateFile(PAWNIO_DEVICE, GENERIC_RW, FILE_SHARE_RW, IntPtr.Zero,
+                                      OPEN_EXISTING, 0, IntPtr.Zero);
+                if (h == IntPtr.Zero || h == (IntPtr)(-1)) return false; // PawnIO not installed
+
+                byte[] blob = System.IO.File.ReadAllBytes(modPath);
+                uint ret;
+                if (!DeviceIoControl(h, PIO_LOAD_BINARY, blob, (uint)blob.Length, null, 0, out ret, IntPtr.Zero)) {
+                    CloseHandle(h); return false; // module rejected (unsigned / wrong key)
+                }
+                pawnHandle = h;
+                useMmio = true;
+                return true;
+            } catch { return false; }
+        }
+
+        // Call a PawnIO module function. input/output are arrays of 64-bit cells.
+        static bool PawnExecute(string fn, long[] input, long[] output) {
+            if (pawnHandle == IntPtr.Zero) return false;
+            byte[] inBuf = new byte[PIO_FN_NAME_LEN + input.Length * sizeof(long)];
+            byte[] nameB = Encoding.ASCII.GetBytes(fn);
+            Buffer.BlockCopy(nameB, 0, inBuf, 0, Math.Min(PIO_FN_NAME_LEN - 1, nameB.Length));
+            Buffer.BlockCopy(input, 0, inBuf, PIO_FN_NAME_LEN, input.Length * sizeof(long));
+            byte[] outBuf = new byte[output.Length * sizeof(long)];
+            uint ret;
+            if (!DeviceIoControl(pawnHandle, PIO_EXECUTE_FN, inBuf, (uint)inBuf.Length,
+                                 outBuf, (uint)outBuf.Length, out ret, IntPtr.Zero))
+                return false;
+            Buffer.BlockCopy(outBuf, 0, output, 0, Math.Min((int)ret, outBuf.Length));
+            return true;
+        }
+
+        public static void Cleanup() {
+            if (pawnHandle != IntPtr.Zero) {
+                try { CloseHandle(pawnHandle); } catch { }
+                pawnHandle = IntPtr.Zero; useMmio = false;
+            }
+        }
 
         const short DATA = 0x300;
         const short CMD  = 0x304;
@@ -27,21 +108,19 @@ namespace RPMac {
         const byte READ_CMD = 0x10, WRITE_CMD = 0x11, GET_KEY_INDEX = 0x12, GET_KEY_TYPE = 0x13;
         const int MIN_WAIT = 8;
 
-        static readonly object gate = new object(); // serializa el acceso al SMC
+        static readonly object gate = new object();
 
-        // ---- protocolo ----
+        // ---- I/O port protocol (pre-T2 Macs) ----
         static void Udelay(int us) {
             long ticks = (long)(us * (Stopwatch.Frequency / 1000000.0));
             if (ticks <= 0) return;
             var sw = Stopwatch.StartNew();
             while (sw.ElapsedTicks < ticks) { }
         }
-        static int InbCmd()  { return Inp32(CMD)  & 0xFF; }
-        static int InbData() { return Inp32(DATA) & 0xFF; }
         static int WaitStatus(int val, int mask) {
             int us = MIN_WAIT;
             for (int i = 0; i < 24; i++) {
-                if ((InbCmd() & mask) == val) return 0;
+                if (((Inp32(CMD) & 0xFF) & mask) == val) return 0;
                 Udelay(us); if (i > 9) us <<= 1;
             }
             return -1;
@@ -58,23 +137,59 @@ namespace RPMac {
             r = SendCommand(READ_CMD); if (r != 0) return r;
             return WaitStatus(0, BUSY);
         }
-        static int ReadSmc(byte cmd, byte[] key, byte[] buf, int len) {
+        static int PortReadSmc(byte cmd, byte[] key, byte[] buf, int len) {
             int r = SmcSane(); if (r != 0) return r;
             if (SendCommand(cmd) != 0 || SendArgument(key) != 0) return -1;
             if (SendByte((byte)len, DATA) != 0) return -1;
             for (int i = 0; i < len; i++) {
                 if (WaitStatus(AWAITING | BUSY, AWAITING | BUSY) != 0) return -1;
-                buf[i] = (byte)InbData();
+                buf[i] = (byte)(Inp32(DATA) & 0xFF);
             }
-            for (int i = 0; i < 16; i++) { Udelay(MIN_WAIT); if ((InbCmd() & AWAITING) == 0) break; InbData(); }
+            for (int i = 0; i < 16; i++) { Udelay(MIN_WAIT); if ((Inp32(CMD) & AWAITING) == 0) break; Inp32(DATA); }
             return WaitStatus(0, BUSY);
         }
-        static int WriteSmc(byte[] key, byte[] buf, int len) {
+        static int PortWriteSmc(byte[] key, byte[] buf, int len) {
             int r = SmcSane(); if (r != 0) return r;
             if (SendCommand(WRITE_CMD) != 0 || SendArgument(key) != 0) return -1;
             if (SendByte((byte)len, DATA) != 0) return -1;
             for (int i = 0; i < len; i++) if (SendByte(buf[i], DATA) != 0) return -1;
             return WaitStatus(0, BUSY);
+        }
+
+        // ---- T2 SMC via PawnIO module (T2 Macs 2018-2020) ----
+        // The AppleT2Smc PawnIO module does the MMIO handshake in kernel mode; here we
+        // just marshal the key/data. The key is packed little-endian (key[0] in the low
+        // byte) so the module's 32-bit register write lands key[0] at offset 0x78, exactly
+        // like *(u32*)key + iowrite32 in the Linux driver. This holds for ASCII keys and
+        // for big-endian index arguments (GET_KEY_BY_INDEX) alike.
+        static long KeyToLong(byte[] key) {
+            uint v = ((uint)key[3] << 24) | ((uint)key[2] << 16) | ((uint)key[1] << 8) | key[0];
+            return v;
+        }
+        static int MmioReadSmc(byte cmd, byte[] key, byte[] buf, int len) {
+            if (len < 0 || len > 32) return -1;
+            long[] inp = new long[] { cmd, KeyToLong(key), len };
+            long[] outp = new long[32];               // module returns one byte per cell
+            if (!PawnExecute("ioctl_smc_read", inp, outp)) return -1;
+            for (int i = 0; i < len; i++) buf[i] = (byte)(outp[i] & 0xFF);
+            return 0;
+        }
+        static int MmioWriteSmc(byte[] key, byte[] buf, int len) {
+            if (len < 0 || len > 32) return -1;
+            long[] inp = new long[34];                 // [key, len, b0..b31]
+            inp[0] = KeyToLong(key);
+            inp[1] = len;
+            for (int i = 0; i < len; i++) inp[2 + i] = buf[i] & 0xFF;
+            long[] outp = new long[1];                  // module declares out_size 0; dummy avoids 0-byte marshal
+            return PawnExecute("ioctl_smc_write", inp, outp) ? 0 : -1;
+        }
+
+        // ---- unified dispatch ----
+        static int ReadSmc(byte cmd, byte[] key, byte[] buf, int len) {
+            return useMmio ? MmioReadSmc(cmd, key, buf, len) : PortReadSmc(cmd, key, buf, len);
+        }
+        static int WriteSmc(byte[] key, byte[] buf, int len) {
+            return useMmio ? MmioWriteSmc(key, buf, len) : PortWriteSmc(key, buf, len);
         }
 
         // ---- helpers ----
@@ -165,9 +280,19 @@ namespace RPMac {
             lock (gate) {
                 double n = ReadNum("FNum");
                 if (double.IsNaN(n) || n < 1 || n > 8) {
-                    WritesAllowed = false;
-                    SafetyReason = "SMC did not return a valid fan count (got " + (double.IsNaN(n) ? "NaN" : n.ToString()) + "). Read-only for safety.";
-                    return false;
+                    // T2 Macs (2018-2020): the T2 chip intercepts the legacy I/O-port protocol → NaN.
+                    // Fall back to the PawnIO kernel module that reaches the SMC over MMIO.
+                    if (registrySaysApple && TryInitMmio()) {
+                        n = ReadNum("FNum");
+                    }
+                    if (double.IsNaN(n) || n < 1 || n > 8) {
+                        WritesAllowed = false;
+                        string t2hint = registrySaysApple && useMmio
+                            ? " T2 module loaded but the SMC did not respond — the T2 register layout on this model may differ."
+                            : (registrySaysApple ? " Looks like a T2 Mac: install PawnIO (pawnio.eu) and keep AppleT2Smc.bin next to RPMac.exe to enable T2 support." : "");
+                        SafetyReason = "SMC did not return a valid fan count (got " + (double.IsNaN(n) ? "NaN" : n.ToString()) + "). Read-only for safety." + t2hint;
+                        return false;
+                    }
                 }
                 double ac = ReadNum("F0Ac"), mn = ReadNum("F0Mn"), mx = ReadNum("F0Mx");
                 // mn puede ser 0 en algunos modelos (el ventilador puede pararse) — solo rechazar negativo
@@ -181,9 +306,10 @@ namespace RPMac {
 
             // SMC coherente -> es hardware Apple, aunque el registro no lo confirme.
             WritesAllowed = true;
+            string modeStr = useMmio ? " (T2 MMIO mode)" : "";
             SafetyReason = registrySaysApple
-                ? "Apple Mac detected, SMC valid. Control enabled."
-                : "SMC valid (Apple hardware confirmed by the SMC; registry id '" + (HardwareName == "" ? "(empty)" : HardwareName) + "' unrecognized). Control enabled.";
+                ? "Apple Mac detected, SMC valid" + modeStr + ". Control enabled."
+                : "SMC valid (Apple hardware confirmed by the SMC; registry id '" + (HardwareName == "" ? "(empty)" : HardwareName) + "' unrecognized)" + modeStr + ". Control enabled.";
             return true;
         }
 
@@ -194,20 +320,22 @@ namespace RPMac {
             lock (gate) {
                 var list = new List<FanInfo>();
                 double dn = ReadNum("FNum"); int n = double.IsNaN(dn) ? 0 : (int)dn;
-                long mask = ReadMaskNoLock();
+                long mask = useMmio ? 0 : ReadMaskNoLock();
                 for (int i = 0; i < n; i++) {
                     string p = "F" + i;
+                    bool forced = useMmio ? (ReadNum(p + "Md") > 0) : ((mask & (1L << i)) != 0);
                     list.Add(new FanInfo {
                         Index = i,
                         Actual = ReadNum(p + "Ac"), Min = ReadNum(p + "Mn"),
                         Max = ReadNum(p + "Mx"), Target = ReadNum(p + "Tg"),
-                        Forced = (mask & (1L << i)) != 0
+                        Forced = forced
                     });
                 }
                 return list;
             }
         }
 
+        // Pre-T2: FS! bitmask controls manual mode for all fans
         static long ReadMaskNoLock() {
             int len; string type;
             if (!KeyInfo("FS! ", out len, out type) || len == 0) return 0;
@@ -223,28 +351,53 @@ namespace RPMac {
             WriteSmc(K("FS! "), b, len);
         }
 
+        // T2: per-fan boolean F%dMd (0=auto, 1=manual) + float F%dTg for target RPM
+        static void T2SetManual(int i, bool manual) {
+            string mk = "F" + i + "Md";
+            int len; string type;
+            if (!KeyInfo(mk, out len, out type) || len == 0) { len = 1; type = "ui8 "; }
+            WriteSmc(K(mk), new byte[] { (byte)(manual ? 1 : 0) }, len);
+        }
+
         public static void SetFanAuto(int i) {
             if (!WritesAllowed) return;
-            lock (gate) { long m = ReadMaskNoLock(); m &= ~(1L << i); WriteMaskNoLock(m); }
+            lock (gate) {
+                if (useMmio) { T2SetManual(i, false); return; }
+                long m = ReadMaskNoLock(); m &= ~(1L << i); WriteMaskNoLock(m);
+            }
         }
         public static void SetFanRpm(int i, double rpm) {
             if (!WritesAllowed) return;
             lock (gate) {
                 string p = "F" + i;
-                double mn = ReadNum(p + "Mn"), mx = ReadNum(p + "Mx");   // recortar al rango real del SMC
+                double mn = ReadNum(p + "Mn"), mx = ReadNum(p + "Mx");
                 if (!double.IsNaN(mn) && rpm < mn) rpm = mn;
                 if (!double.IsNaN(mx) && rpm > mx) rpm = mx;
+                if (useMmio) {
+                    T2SetManual(i, true);
+                    int len; string type;
+                    if (KeyInfo(p + "Tg", out len, out type)) WriteSmc(K(p + "Tg"), Encode(type, len, rpm), len);
+                    return;
+                }
                 long m = ReadMaskNoLock(); m |= (1L << i); WriteMaskNoLock(m);
-                int len; string type;
-                if (KeyInfo(p + "Tg", out len, out type)) WriteSmc(K(p + "Tg"), Encode(type, len, rpm), len);
+                int tlen; string ttype;
+                if (KeyInfo(p + "Tg", out tlen, out ttype)) WriteSmc(K(p + "Tg"), Encode(ttype, tlen, rpm), tlen);
             }
         }
         public static void SetFanMax(int i) {
             if (!WritesAllowed) return;
             lock (gate) {
                 string p = "F" + i; double mx = ReadNum(p + "Mx");
-                if (!double.IsNaN(mx)) { long m = ReadMaskNoLock(); m |= (1L << i); WriteMaskNoLock(m);
-                    int len; string type; if (KeyInfo(p + "Tg", out len, out type)) WriteSmc(K(p + "Tg"), Encode(type, len, mx), len); }
+                if (double.IsNaN(mx)) return;
+                if (useMmio) {
+                    T2SetManual(i, true);
+                    int len; string type;
+                    if (KeyInfo(p + "Tg", out len, out type)) WriteSmc(K(p + "Tg"), Encode(type, len, mx), len);
+                    return;
+                }
+                long m = ReadMaskNoLock(); m |= (1L << i); WriteMaskNoLock(m);
+                int tlen; string ttype;
+                if (KeyInfo(p + "Tg", out tlen, out ttype)) WriteSmc(K(p + "Tg"), Encode(ttype, tlen, mx), tlen);
             }
         }
 
