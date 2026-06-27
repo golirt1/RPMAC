@@ -59,18 +59,45 @@ namespace RPMac {
             SetTitleBar(IsDark(name));
         }
 
+        // Sensor labels verified against VirtualSMC iStat.txt, KnownSMCKeys and applesmc.c.
+        // TC0P is proximity (near socket) — NOT core temp; TC0D is the real die reading.
+        // Dual-socket Mac Pro (4,1/5,1) uses TCAD/TCBD (die) and TCAH/TCBH (heatsink).
+        // Only sensors present and plausible on this machine are shown, so extra entries
+        // for other models (dual-CPU, extra GPUs) don't appear on single-CPU machines.
         static readonly string[][] CURATED = new string[][] {
-            new string[]{"TC0P","CPU"},
+            // CPU — single socket (most Intel Macs)
+            new string[]{"TC0D","CPU (die)"},
+            new string[]{"TC0H","CPU (heatsink)"},
+            new string[]{"TC0P","CPU (proximity)"},   // near socket, runs hotter than die on some models
+            new string[]{"TCXC","CPU (PECI)"},
             new string[]{"TCXc","CPU (PECI)"},
-            new string[]{"TC0c","CPU (core)"},
-            new string[]{"TG0P","GPU 1"},
-            new string[]{"TG0D","GPU 1 (core)"},
-            new string[]{"TG1P","GPU 2"},
-            new string[]{"TG1D","GPU 2 (core)"},
+            new string[]{"TC0E","CPU"},
+            new string[]{"TC0F","CPU"},
+            // CPU — dual socket (Mac Pro 4,1 / 5,1, 2009-2012)
+            new string[]{"TCAD","CPU A (die)"},
+            new string[]{"TCAH","CPU A (heatsink)"},
+            new string[]{"TCBD","CPU B (die)"},
+            new string[]{"TCBH","CPU B (heatsink)"},
+            // GPU
+            new string[]{"TG0D","GPU 1 (die)"},
+            new string[]{"TG0H","GPU 1 (heatsink)"},
+            new string[]{"TG0P","GPU 1 (proximity)"},
+            new string[]{"TG1D","GPU 2 (die)"},
+            new string[]{"TG1H","GPU 2 (heatsink)"},
+            new string[]{"TG1P","GPU 2 (proximity)"},
+            new string[]{"TCGC","GPU (PECI)"},
+            // System
             new string[]{"TM0P","Memory"},
+            new string[]{"TM0S","Memory slot"},
             new string[]{"TM1P","Memory 2"},
             new string[]{"TA0P","Ambient"},
-            new string[]{"TPCD","Power"},
+            new string[]{"TA1P","Ambient 2"},
+            new string[]{"TPCD","Power (PCH)"},
+            new string[]{"TH0P","Hard drive"},
+            new string[]{"TN0H","Northbridge"},
+            new string[]{"TI0P","Thunderbolt"},
+            new string[]{"TB0T","Battery"},
+            new string[]{"TW0P","Wi-Fi"},
         };
 
         // Estilos modernos (slider + scrollbar) cargados por XAML
@@ -533,6 +560,7 @@ namespace RPMac {
             quitting = true;
             try { if (tray != null) tray.Visible = false; } catch { }
             running = false;
+            Smc.Cleanup();
             System.Windows.Application.Current.Shutdown();
         }
         System.Drawing.Icon MakeIcon() {
