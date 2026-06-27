@@ -22,7 +22,7 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 ## Install
 No installer needed — it's a portable app.
 
-1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.1.0-windows.zip` (under **Assets**).
+1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.1.1-windows.zip` (under **Assets**).
 2. **Unzip it** to any folder you like (e.g. your Desktop). Keep `RPMac.exe` and `inpout32.dll` **together in the same folder**.
 3. **Right-click `RPMac.exe` → "Run as administrator"** (administrator rights are required to access the Mac's hardware/SMC).
 4. Set each fan to **Auto / Max / a custom RPM**. Temperatures update live.
@@ -35,7 +35,7 @@ To **uninstall**, just delete the folder. Settings live in `%APPDATA%\RPMac`; if
 | Hardware | Status |
 |---|---|
 | Intel Macs (up to 2017) on Boot Camp | Should work (tested on MacPro6,1 and MacPro3,1) |
-| Intel Macs with T2 (2018-2020) | Likely; `flt` format not yet verified |
+| Intel Macs with T2 (2018-2020) | **Not working yet** — the T2 uses a different SMC interface; support is in progress |
 | Apple Silicon (M1+) | Not possible (no Boot Camp) |
 | Non-Apple PCs | Read-only (writes are blocked) |
 
@@ -55,12 +55,12 @@ Beyond the two Mac Pros above, RPMac has **not** been tested on other Mac models
 
 - **Fan control** is the most portable part (it uses standard keys), so it has the highest chance of working everywhere.
 - **Temperature sensor names vary by model**, so on other Macs some labeled sensors may be missing or wrong (use "Show all sensors (raw)" to see everything).
-- **T2 Macs (2018-2020)** use the `flt` value format, which is implemented but **not yet verified**.
+- **T2 Macs (2018-2020) are not supported yet.** The T2 chip intercepts the legacy SMC interface, so RPMac can't read the SMC and stays read-only on these machines. A fix that reaches the SMC through a signed kernel driver (PawnIO) is in progress.
 - If the SMC does not respond with plausible values, RPMac **automatically stays read-only** and writes nothing.
 
 ## Help us test it
 
-RPMac has only been verified on one Mac, so **we would really appreciate your help confirming whether it works on yours** — whether it works *or not*. Every report helps build a reliable compatibility list.
+RPMac has only been verified on a couple of Macs, so **we would really appreciate your help confirming whether it works on yours** — whether it works *or not*. Every report helps build a reliable compatibility list.
 
 Please **open an issue** with:
 

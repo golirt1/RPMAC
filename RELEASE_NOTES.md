@@ -1,3 +1,16 @@
+## RPMac v1.1.1
+
+**The other app capable of controlling fans on Intel Macs in Windows — for free.**
+
+### What's fixed in 1.1.1
+- **Corrected CPU sensor labeling.** `TC0P` was labeled "CPU", but it's a socket-**proximity** sensor that reads hotter than the actual core — on some Macs it can show ~105°C while the real die temp is lower. It's now labeled **"CPU (proximity)"**, and **`TC0D` "CPU (die)"** is surfaced as the true per-core reading. Reported on a dual-CPU Mac Pro.
+
+### Download
+Download `RPMac-v1.1.1-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
+Keep `RPMac.exe` and `inpout32.dll` together in the same folder.
+
+---
+
 ## RPMac v1.1.0
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**
