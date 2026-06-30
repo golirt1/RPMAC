@@ -1,10 +1,20 @@
 RPMac - Quick start
 ===================
 
-1. Keep RPMac.exe and inpout32.dll TOGETHER in the same folder.
+1. Keep RPMac.exe, smccore.exe and inpout32.dll TOGETHER in the same folder.
 2. Right-click RPMac.exe  ->  "Run as administrator"
    (administrator rights are required to access the Mac's hardware/SMC).
-3. Set each fan to Auto / Max / a custom RPM. Temperatures update live.
+3. Set each fan to Auto / Max / a custom RPM, or use "Curve" to ramp the fan
+   between a min and max temperature. Temperatures update live.
+
+Scripting (optional)
+--------------------
+smccore.exe is a command-line tool for the same control, e.g.:
+   smccore.exe list                 show fans
+   smccore.exe set 0 2000           fan 0 -> 2000 RPM
+   smccore.exe auto 0               fan 0 -> automatic
+   smccore.exe max                  all fans -> maximum
+Run it from an administrator terminal, with inpout32.dll in the folder.
 
 Requirements
 ------------

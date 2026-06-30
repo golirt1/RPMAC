@@ -1,3 +1,21 @@
+## RPMac v1.2.0
+
+**The other app capable of controlling fans on Intel Macs in Windows — for free.**
+
+### What's new in 1.2.0
+- **Per-fan temperature curve.** Each fan now has a **Curve** mode: pick a temperature sensor, set a min and max temperature and a min and max RPM, and the fan ramps linearly between them — below the min temp it runs at min RPM, above the max temp at max RPM. Works independently per fan, so multi-fan Macs can curve each one separately.
+- **Command-line tool (`smccore.exe`)** for scripting and automation, now with **per-fan** control:
+  - `smccore.exe list | temps` — read fans / sensors
+  - `smccore.exe auto [fan] | max [fan] | set [fan] <rpm>` — control all fans, or one fan by number
+  - RPM values are clamped to each fan's own min/max; read-only on non-Apple hardware.
+- Fixed the build script and bundled `smccore.exe` alongside `RPMac.exe`.
+
+### Download
+Download `RPMac-v1.2.0-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
+Keep `RPMac.exe`, `smccore.exe` and `inpout32.dll` together in the same folder.
+
+---
+
 ## RPMac v1.1.1
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**

@@ -8,7 +8,9 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 
 ## Features
 - Real-time fan RPM and temperature monitoring
-- Per-fan control: Auto / Max / custom RPM
+- Per-fan control: Auto / Max / custom RPM / **temperature curve**
+- **Per-fan temperature curve** — pick a sensor and ramp RPM between a min and max temperature
+- Command-line tool (`smccore.exe`) for scripting fan control
 - Curated, friendly temperature sensors (plus a raw view of every key)
 - On-screen overlay (FRAPS-style): always-on-top, top-right corner, vertical or horizontal, with selectable fans/sensors
 - Themes: Dark / Light / Nature / Japan
@@ -22,8 +24,8 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 ## Install
 No installer needed — it's a portable app.
 
-1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.1.1-windows.zip` (under **Assets**).
-2. **Unzip it** to any folder you like (e.g. your Desktop). Keep `RPMac.exe` and `inpout32.dll` **together in the same folder**.
+1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.2.0-windows.zip` (under **Assets**).
+2. **Unzip it** to any folder you like (e.g. your Desktop). Keep `RPMac.exe`, `smccore.exe` and `inpout32.dll` **together in the same folder**.
 3. **Right-click `RPMac.exe` → "Run as administrator"** (administrator rights are required to access the Mac's hardware/SMC).
 4. Set each fan to **Auto / Max / a custom RPM**. Temperatures update live.
 
@@ -73,6 +75,31 @@ Please **open an issue** with:
 - Any error messages or odd readings (a screenshot is great)
 
 Even a quick "works fine on my iMac 2017" is hugely valuable. Thank you!
+
+## Scripting / command line
+
+The release also includes **`smccore.exe`**, a small command-line tool for the same
+SMC control, so you can drive the fans from scripts, Task Scheduler, etc. Run it from
+an **administrator** terminal, with `inpout32.dll` in the same folder:
+
+```
+smccore.exe list              show all fans (RPM, min, max, target)
+smccore.exe temps             show fans + temperature sensors
+smccore.exe auto              return ALL fans to automatic
+smccore.exe max               force ALL fans to maximum
+smccore.exe set 2000          set ALL fans to 2000 RPM
+smccore.exe auto 0            return fan 0 to automatic
+smccore.exe max 0             force fan 0 to maximum
+smccore.exe set 0 2000        set fan 0 to 2000 RPM
+smccore.exe key TC0D          dump a raw SMC key
+```
+
+Fan numbers are `0 .. N-1` (see `list`). RPM values are clamped to each fan's own
+min/max. Like the GUI, it stays read-only and writes nothing on non-Apple hardware.
+
+> Prefer the GUI? Each fan has a built-in **temperature curve** (the "Curve" button) that
+> ramps RPM between a min and max temperature on a sensor you choose. The command line is
+> there for scripting/automation; you can also build your own ramp with `temps` + `set`.
 
 ## How it works
 RPMac uses the public Apple SMC protocol (the same one documented in the Linux `applesmc` driver) over the SMC's I/O ports (`DATA = 0x300`, `CMD = 0x304`), via the InpOut32 ring-0 I/O bridge. It reads and writes standard SMC keys (`FNum`, `F<n>Tg`, `FS! `, temperature `T...` keys) and auto-detects each key's data type (`fpe2`, `flt`, `ui*`, `sp*`, ...).
