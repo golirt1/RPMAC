@@ -862,6 +862,7 @@ namespace RPMac {
             overlay.Show();
             RefreshOverlayNow();
             overlay.Reposition();
+            overlay.BringTopmost();
         }
         void HideOverlay() { if (overlay != null) overlay.Hide(); }
 
@@ -905,6 +906,20 @@ namespace RPMac {
         const int WS_EX_TRANSPARENT = 0x20, WS_EX_LAYERED = 0x80000, WS_EX_TOOLWINDOW = 0x80;
         [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr h, int i);
         [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr h, int i, int v);
+        [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+        static readonly IntPtr HWND_TOPMOST = new IntPtr(-1);
+        const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOACTIVATE = 0x10;
+
+        // Re-assert top-most z-order. Borderless/windowed games often push their own
+        // window to the top and cover the overlay; calling this each refresh keeps us above
+        // them without stealing focus. (Exclusive-fullscreen games can't be drawn over by
+        // any window-based overlay — use borderless/windowed mode for those.)
+        public void BringTopmost() {
+            try {
+                IntPtr h = new WindowInteropHelper(this).Handle;
+                if (h != IntPtr.Zero) SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            } catch { }
+        }
 
         public bool Horizontal = false;
         List<string[]> lastRows = new List<string[]>();
@@ -962,7 +977,7 @@ namespace RPMac {
         TextBlock Value(string t, double size) { return new TextBlock { Text = t, Foreground = MainWindow.TXT, FontSize = size, FontWeight = FontWeights.SemiBold, Effect = Shadow(), VerticalAlignment = VerticalAlignment.Center }; }
 
         // rows: cada item es { etiqueta, valor }
-        public void Update(List<string[]> rows) { lastRows = rows; Render(rows); }
+        public void Update(List<string[]> rows) { lastRows = rows; Render(rows); BringTopmost(); }
 
         void Render(List<string[]> rows) {
             panel.Orientation = Horizontal ? Orientation.Horizontal : Orientation.Vertical;
