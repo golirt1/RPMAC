@@ -37,9 +37,27 @@ if errorlevel 1 (
   exit /b 1
 )
 
-copy /y "%ROOT%third_party\InpOut32\inpout32.dll" "%ROOT%build\inpout32.dll" >nul
+echo Compiling smccore (command-line / scripting tool)...
+"%FW%\csc.exe" /nologo /target:exe /platform:x86 ^
+  /out:"%ROOT%build\smccore.exe" ^
+  "%ROOT%src\smccore.cs"
+
+if errorlevel 1 (
+  echo.
+  echo BUILD FAILED (smccore)
+  exit /b 1
+)
+
+REM Copy inpout32.dll. If RPMac is running it holds the DLL open; that's fine,
+REM the existing copy is identical, so don't fail the build over it.
+copy /y "%ROOT%third_party\InpOut32\inpout32.dll" "%ROOT%build\inpout32.dll" >nul 2>&1
+if not exist "%ROOT%build\inpout32.dll" (
+  echo BUILD FAILED: inpout32.dll missing
+  exit /b 1
+)
 
 echo.
-echo BUILD OK  -^>  build\RPMac.exe
-echo Run it as administrator. Keep inpout32.dll next to RPMac.exe.
+echo BUILD OK  -^>  build\RPMac.exe  +  build\smccore.exe
+echo Run as administrator. Keep inpout32.dll next to them.
 endlocal
+exit /b 0

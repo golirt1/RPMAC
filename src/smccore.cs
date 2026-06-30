@@ -8,7 +8,9 @@
 // Universal: descubre tipo/longitud de cada clave (fpe2, flt, ui*, sp*, si*),
 // enumera todos los ventiladores y lee sensores de temperatura.
 //
-// Uso:  smccore.exe [list | temps | max | auto | set <rpm> | key <CLAVE>]
+// Uso:  smccore.exe [list | temps | max [fan] | auto [fan] | set [fan] <rpm> | key <CLAVE>]
+//   max/auto/set sin numero de fan actuan sobre TODOS los ventiladores.
+//   con numero de fan (0..N-1) actuan solo sobre ese ventilador.
 
 using System;
 using System.IO;
@@ -237,6 +239,44 @@ class SmcCore {
         }
     }
 
+    // ---------------- acciones por-ventilador ----------------
+    static bool ValidFan(int fan) {
+        int n = FanCount();
+        if (fan < 0 || fan >= n) { P("Fan " + fan + " fuera de rango (hay " + n + " ventiladores: 0.." + (n - 1) + ")"); return false; }
+        return true;
+    }
+    static void SetForcedOne(int fan, bool on) {
+        if (!ValidFan(fan)) return;
+        int len; string type;
+        if (!KeyInfo("FS! ", out len, out type) || len == 0) { P("No se pudo leer FS!"); return; }
+        byte[] cur = new byte[len];
+        ReadSmc(READ_CMD, K("FS! "), cur, len);
+        long mask = UintBE(cur, len);
+        if (on) mask |= (1L << fan); else mask &= ~(1L << fan);
+        byte[] nv = new byte[len];
+        long m = mask;
+        for (int i = len - 1; i >= 0; i--) { nv[i] = (byte)(m & 0xFF); m >>= 8; }
+        int r = WriteSmc(K("FS! "), nv, len);
+        P("FS!  fan " + fan + " -> " + (on ? "forzado" : "auto") + "  ret=" + r);
+    }
+    static void SetOne(int fan, double rpm, bool toMax) {
+        if (!ValidFan(fan)) return;
+        string p = "F" + fan;
+        SetForcedOne(fan, true);
+        int len; string type;
+        if (!KeyInfo(p + "Tg", out len, out type)) { P("Fan " + fan + ": sin clave Tg"); return; }
+        double target = toMax ? ReadNum(p + "Mx") : rpm;
+        if (double.IsNaN(target)) { P("Fan " + fan + ": valor/Mx invalido"); return; }
+        if (!toMax) {   // recortar al rango real del SMC
+            double mn = ReadNum(p + "Mn"), mx = ReadNum(p + "Mx");
+            if (!double.IsNaN(mn) && target < mn) target = mn;
+            if (!double.IsNaN(mx) && target > mx) target = mx;
+        }
+        byte[] b = Encode(type, len, target);
+        int r = WriteSmc(K(p + "Tg"), b, len);
+        P(string.Format("Fan {0}: objetivo -> {1:0} RPM ({2})  ret={3}", fan, target, type.TrimEnd('\0', ' '), r));
+    }
+
     static void DumpKey(string key) {
         int len; string type;
         if (!KeyInfo(key, out len, out type)) { P(key + ": no existe / sin info"); return; }
@@ -255,11 +295,18 @@ class SmcCore {
             switch (mode) {
                 case "list":  ListFans(); break;
                 case "temps": ListFans(); P(""); ListTemps(); break;
-                case "max":   P("Forzando TODOS los ventiladores al MAXIMO..."); SetAll(0, true); break;
-                case "auto":  P("Devolviendo ventiladores a AUTOMATICO..."); SetForcedAll(false); break;
+                case "max":
+                    if (args.Length > 1) { int f = int.Parse(args[1]); P("Fan " + f + " al MAXIMO..."); SetOne(f, 0, true); }
+                    else { P("Forzando TODOS los ventiladores al MAXIMO..."); SetAll(0, true); }
+                    break;
+                case "auto":
+                    if (args.Length > 1) { int f = int.Parse(args[1]); P("Fan " + f + " a AUTOMATICO..."); SetForcedOne(f, false); }
+                    else { P("Devolviendo TODOS los ventiladores a AUTOMATICO..."); SetForcedAll(false); }
+                    break;
                 case "set":
-                    if (args.Length > 1) { double rpm = double.Parse(args[1]); P("Fijando " + rpm + " RPM..."); SetAll(rpm, false); }
-                    else P("Uso: smccore.exe set <rpm>");
+                    if (args.Length > 2)      { int f = int.Parse(args[1]); double rpm = double.Parse(args[2]); P("Fan " + f + " a " + rpm + " RPM..."); SetOne(f, rpm, false); }
+                    else if (args.Length > 1) { double rpm = double.Parse(args[1]); P("Fijando TODOS a " + rpm + " RPM..."); SetAll(rpm, false); }
+                    else P("Uso: smccore.exe set [fan] <rpm>");
                     break;
                 case "key":
                     if (args.Length > 1) DumpKey(args[1]);
