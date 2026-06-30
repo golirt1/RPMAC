@@ -6,6 +6,36 @@ RPMac is a free and open-source fan-control utility for **Intel-based Macs runni
 
 Designed as a lightweight, modern alternative to paid tools, RPMac includes **hardware safety checks**: it stays read-only on non-Apple hardware and never disables the SMC's built-in thermal protection.
 
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/main.png" alt="Fan control and live temperatures" width="360"><br>
+      <sub><b>Fan control & live temperatures</b><br>Auto · Max · Manual · Curve, per fan</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/settings.png" alt="Settings, overlay options and themes" width="360"><br>
+      <sub><b>Settings, overlay options & themes</b><br>Start with Windows · °C/°F · Dark/Light/Nature/Japan</sub>
+    </td>
+  </tr>
+</table>
+
+**On-screen overlay** (FRAPS-style, always on top — works over games in borderless/windowed mode):
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="docs/screenshots/overlay-vertical.png" alt="Vertical overlay" width="210"><br>
+      <sub><b>Vertical</b></sub>
+    </td>
+    <td align="center">
+      <img src="docs/screenshots/overlay-horizontal.png" alt="Horizontal overlay" width="520"><br>
+      <sub><b>Horizontal (compact)</b></sub>
+    </td>
+  </tr>
+</table>
+
 ## Features
 - Real-time fan RPM and temperature monitoring
 - Per-fan control: Auto / Max / custom RPM / **temperature curve**
