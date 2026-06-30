@@ -117,6 +117,50 @@ namespace RPMac {
       </ControlTemplate>
     </Setter.Value></Setter>
   </Style>
+  <Style TargetType=""ComboBox"">
+    <Setter Property=""Foreground"" Value=""#EDEDED""/>
+    <Setter Property=""Height"" Value=""30""/>
+    <Setter Property=""Template""><Setter.Value>
+      <ControlTemplate TargetType=""ComboBox"">
+        <Grid>
+          <ToggleButton Name=""ToggleButton"" Focusable=""false"" ClickMode=""Press"" OverridesDefaultStyle=""True""
+              IsChecked=""{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"">
+            <ToggleButton.Template>
+              <ControlTemplate TargetType=""ToggleButton"">
+                <Border Background=""#2A2A32"" BorderBrush=""#3A3A42"" BorderThickness=""1"" CornerRadius=""8"">
+                  <Path HorizontalAlignment=""Right"" VerticalAlignment=""Center"" Margin=""0,0,12,0""
+                        Data=""M 0 0 L 8 0 L 4 5 Z"" Fill=""#EDEDED""/>
+                </Border>
+              </ControlTemplate>
+            </ToggleButton.Template>
+          </ToggleButton>
+          <ContentPresenter IsHitTestVisible=""False"" Content=""{TemplateBinding SelectionBoxItem}""
+              ContentTemplate=""{TemplateBinding SelectionBoxItemTemplate}""
+              Margin=""12,0,28,0"" VerticalAlignment=""Center"" HorizontalAlignment=""Left""/>
+          <Popup Name=""Popup"" Placement=""Bottom"" IsOpen=""{TemplateBinding IsDropDownOpen}""
+                 AllowsTransparency=""True"" Focusable=""False"" PopupAnimation=""Slide"">
+            <Border Background=""#2A2A32"" BorderBrush=""#3A3A42"" BorderThickness=""1"" CornerRadius=""8""
+                    MinWidth=""{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"" MaxHeight=""220"" Margin=""0,3,0,0"">
+              <ScrollViewer><StackPanel IsItemsHost=""True""/></ScrollViewer>
+            </Border>
+          </Popup>
+        </Grid>
+      </ControlTemplate>
+    </Setter.Value></Setter>
+  </Style>
+  <Style TargetType=""ComboBoxItem"">
+    <Setter Property=""Foreground"" Value=""#EDEDED""/>
+    <Setter Property=""Template""><Setter.Value>
+      <ControlTemplate TargetType=""ComboBoxItem"">
+        <Border Name=""Bd"" Background=""Transparent"" Padding=""12,8,12,8"" CornerRadius=""6"">
+          <ContentPresenter/>
+        </Border>
+        <ControlTemplate.Triggers>
+          <Trigger Property=""IsHighlighted"" Value=""True""><Setter TargetName=""Bd"" Property=""Background"" Value=""#0A84FF""/></Trigger>
+        </ControlTemplate.Triggers>
+      </ControlTemplate>
+    </Setter.Value></Setter>
+  </Style>
   <Style TargetType=""ScrollBar"">
     <Setter Property=""Width"" Value=""10""/>
     <Setter Property=""Background"" Value=""Transparent""/>
@@ -137,11 +181,26 @@ namespace RPMac {
         class FanUi {
             public int Index;
             public double Max;
+            public double Min;
             public TextBlock Rpm, Info, Mode;
             public Slider Slider;
             public TextBlock SliderVal;
             public Border Auto, MaxBtn, Manual, BarFill, Apply;
             public UIElement ManualRow;
+
+            // Current mode: "auto" | "max" | "manual" | "curve". Tracked explicitly so
+            // the refresh loop knows which fans to drive, without inspecting UI state.
+            public volatile string CurMode = "auto";
+
+            // Temperature-curve controls + cached values. The cached values are what the
+            // refresh loop reads (UI controls are only touched on the UI thread).
+            public Border CurveBtn, CurveApply;
+            public UIElement CurveRow;
+            public ComboBox CurveSensor;
+            public Slider CtMinS, CtMaxS, CrMinS, CrMaxS;
+            public TextBlock CtMinV, CtMaxV, CrMinV, CrMaxV;
+            public string CurveSensorKey;
+            public double CtMin = 40, CtMax = 80, CrMin, CrMax;
         }
 
         readonly List<FanUi> fans = new List<FanUi>();
@@ -256,19 +315,78 @@ namespace RPMac {
         }
 
         void SetMode(FanUi f, string mode) {
+            f.CurMode = mode;
             f.Auto.Background = (mode == "auto") ? ACCENT : CHIP;
             f.MaxBtn.Background = (mode == "max") ? RED : CHIP;
             f.Manual.Background = (mode == "manual") ? ACCENT : CHIP;
+            if (f.CurveBtn != null) f.CurveBtn.Background = (mode == "curve") ? ACCENT : CHIP;
             bool man = (mode == "manual");
+            bool cur = (mode == "curve");
             f.Slider.IsEnabled = man;
             if (f.ManualRow != null) f.ManualRow.Visibility = man ? Visibility.Visible : Visibility.Collapsed;
             if (f.Apply != null) f.Apply.Visibility = man ? Visibility.Visible : Visibility.Collapsed;
-            f.Mode.Text = mode == "auto" ? "Mode: automatic" : mode == "max" ? "Mode: maximum" : "Mode: manual";
+            if (f.CurveRow != null) f.CurveRow.Visibility = cur ? Visibility.Visible : Visibility.Collapsed;
+            if (f.CurveApply != null) f.CurveApply.Visibility = cur ? Visibility.Visible : Visibility.Collapsed;
+            f.Mode.Text = mode == "auto" ? "Mode: automatic"
+                        : mode == "max" ? "Mode: maximum"
+                        : mode == "manual" ? "Mode: manual"
+                        : "Mode: curve";
+        }
+
+        // Linear ramp: rpm_min below t_min, rpm_max above t_max, interpolated between.
+        static double CurveRpm(double temp, double tMin, double tMax, double rMin, double rMax) {
+            if (double.IsNaN(temp)) return rMin;
+            if (tMax <= tMin) return rMin;
+            if (temp <= tMin) return rMin;
+            if (temp >= tMax) return rMax;
+            return rMin + (rMax - rMin) * (temp - tMin) / (tMax - tMin);
+        }
+
+        // One labeled slider row used by the curve editor. Live-updates its value label.
+        StackPanel CurveSliderRow(string label, Slider s, TextBlock val, string unit) {
+            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
+            row.Children.Add(new TextBlock { Text = label, Foreground = SUB, Width = 70, VerticalAlignment = VerticalAlignment.Center, FontSize = 12 });
+            s.Width = 200; s.VerticalAlignment = VerticalAlignment.Center;
+            row.Children.Add(s);
+            val.Text = ((int)s.Value) + unit; val.Foreground = TXT; val.Width = 70;
+            val.VerticalAlignment = VerticalAlignment.Center; val.Margin = new Thickness(10, 0, 0, 0);
+            val.FontWeight = FontWeights.SemiBold; val.FontSize = 12;
+            s.ValueChanged += delegate { val.Text = ((int)s.Value) + unit; };
+            row.Children.Add(val);
+            return row;
+        }
+
+        // Read the curve editor controls, validate, cache the values on the FanUi (so the
+        // refresh loop can use them without touching UI), switch the fan to curve mode and
+        // persist. The loop then drives the RPM each tick.
+        void ApplyCurveFromUi(FanUi f) {
+            double tmin = f.CtMinS.Value, tmax = f.CtMaxS.Value;
+            double rmin = f.CrMinS.Value, rmax = f.CrMaxS.Value;
+            if (tmax <= tmin) { status.Text = "Curve: max temp must be above min temp."; return; }
+            if (rmax < rmin) { double t = rmin; rmin = rmax; rmax = t; }   // tolerate reversed RPM sliders
+            string key = null;
+            var item = f.CurveSensor.SelectedItem as ComboBoxItem;
+            if (item != null) key = item.Tag as string;
+            if (key == null) { status.Text = "Curve: pick a sensor first."; return; }
+            f.CurveSensorKey = key; f.CtMin = tmin; f.CtMax = tmax; f.CrMin = rmin; f.CrMax = rmax;
+            SetMode(f, "curve");
+            Settings.SetFanCurve(f.Index, key, tmin, tmax, rmin, rmax);
+            status.Text = string.Format("Fan {0}: curve on · {1} {2:0}–{3:0}°C → {4:0}–{5:0} RPM",
+                f.Index, key, tmin, tmax, rmin, rmax);
         }
 
         void BuildFans(Panel parent) {
+            // Sensors offered in the curve dropdown: curated keys present with a plausible
+            // reading (same criterion as the Temperatures card).
+            var availSensors = new List<string[]>();
+            foreach (var c in CURATED) {
+                double v = Smc.ReadTemp(c[0]);
+                if (!double.IsNaN(v) && v >= 5 && v <= 120) availSensors.Add(new[] { c[0], c[1] });
+            }
+
             foreach (var fi in Smc.GetFans()) {
-                var f = new FanUi { Index = fi.Index, Max = double.IsNaN(fi.Max) ? 6000 : fi.Max };
+                double fmn = double.IsNaN(fi.Min) ? 0 : fi.Min;
+                var f = new FanUi { Index = fi.Index, Max = double.IsNaN(fi.Max) ? 6000 : fi.Max, Min = fmn };
                 var col = new StackPanel();
                 col.Children.Add(new TextBlock { Text = "FAN " + fi.Index, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = SUB });
 
@@ -293,6 +411,10 @@ namespace RPMac {
                 f.MaxBtn = Chip("Max", CHIP, TXT, delegate { if (!Guard()) return; Smc.SetFanMax(f.Index); SetMode(f, "max"); Settings.SetFan(f.Index, "max", 0); });
                 f.Manual = Chip("Manual", CHIP, TXT, delegate { if (!Guard()) return; SetMode(f, "manual"); });
                 chips.Children.Add(f.Auto); chips.Children.Add(f.MaxBtn); chips.Children.Add(f.Manual);
+                if (availSensors.Count > 0) {
+                    f.CurveBtn = Chip("Curve", CHIP, TXT, delegate { if (!Guard()) return; SetMode(f, "curve"); });
+                    chips.Children.Add(f.CurveBtn);
+                }
                 col.Children.Add(chips);
 
                 var manualRow = new StackPanel { Orientation = Orientation.Horizontal };
@@ -312,7 +434,43 @@ namespace RPMac {
                 col.Children.Add(apply);
                 f.Apply = apply;
 
-                if (!Smc.WritesAllowed) { f.Auto.Opacity = 0.45; f.MaxBtn.Opacity = 0.45; f.Manual.Opacity = 0.45; apply.Opacity = 0.45; }
+                // ---- temperature curve controls (only if there are usable sensors) ----
+                if (availSensors.Count > 0) {
+                    var cv = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
+                    var sensRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 2) };
+                    sensRow.Children.Add(new TextBlock { Text = "Sensor", Foreground = SUB, Width = 70, VerticalAlignment = VerticalAlignment.Center, FontSize = 12 });
+                    f.CurveSensor = new ComboBox { Width = 200, VerticalAlignment = VerticalAlignment.Center };
+                    foreach (var sg in availSensors) f.CurveSensor.Items.Add(new ComboBoxItem { Content = sg[1], Tag = sg[0] });
+                    f.CurveSensor.SelectedIndex = 0;
+                    sensRow.Children.Add(f.CurveSensor);
+                    cv.Children.Add(sensRow);
+
+                    f.CrMin = f.Min; f.CrMax = f.Max;
+                    f.CtMinS = new Slider { Minimum = 0, Maximum = 110, Value = f.CtMin };
+                    f.CtMaxS = new Slider { Minimum = 0, Maximum = 110, Value = f.CtMax };
+                    f.CrMinS = new Slider { Minimum = f.Min, Maximum = f.Max, Value = f.Min };
+                    f.CrMaxS = new Slider { Minimum = f.Min, Maximum = f.Max, Value = f.Max };
+                    f.CtMinV = new TextBlock(); f.CtMaxV = new TextBlock(); f.CrMinV = new TextBlock(); f.CrMaxV = new TextBlock();
+                    cv.Children.Add(CurveSliderRow("Temp min", f.CtMinS, f.CtMinV, " °C"));
+                    cv.Children.Add(CurveSliderRow("Temp max", f.CtMaxS, f.CtMaxV, " °C"));
+                    cv.Children.Add(CurveSliderRow("RPM min",  f.CrMinS, f.CrMinV, " RPM"));
+                    cv.Children.Add(CurveSliderRow("RPM max",  f.CrMaxS, f.CrMaxV, " RPM"));
+                    f.CurveRow = cv;
+                    col.Children.Add(cv);
+
+                    var fc = f;
+                    var curveApply = Chip("Apply curve", ACCENT, Brushes.White, delegate { if (!Guard()) return; ApplyCurveFromUi(fc); });
+                    curveApply.Margin = new Thickness(0, 10, 0, 0);
+                    curveApply.HorizontalAlignment = HorizontalAlignment.Left;
+                    f.CurveApply = curveApply;
+                    col.Children.Add(curveApply);
+                }
+
+                if (!Smc.WritesAllowed) {
+                    f.Auto.Opacity = 0.45; f.MaxBtn.Opacity = 0.45; f.Manual.Opacity = 0.45; apply.Opacity = 0.45;
+                    if (f.CurveBtn != null) f.CurveBtn.Opacity = 0.45;
+                    if (f.CurveApply != null) f.CurveApply.Opacity = 0.45;
+                }
 
                 f.Mode = new TextBlock { Text = "", FontSize = 11, Foreground = SUB, Margin = new Thickness(0, 10, 0, 0) };
                 col.Children.Add(f.Mode);
@@ -590,10 +748,23 @@ namespace RPMac {
             foreach (var f in fans) {
                 if (!Settings.Fans.ContainsKey(f.Index)) continue;
                 var s = Settings.Fans[f.Index];
-                string mode = s[0]; int rpm = 0; int.TryParse(s[1], out rpm);
+                string mode = s[0]; int rpm = 0; if (s.Length > 1) int.TryParse(s[1], out rpm);
                 try {
                     if (mode == "max") { Smc.SetFanMax(f.Index); SetMode(f, "max"); }
                     else if (mode == "manual") { Smc.SetFanRpm(f.Index, rpm); f.Slider.Value = rpm; SetMode(f, "manual"); }
+                    else if (mode == "curve" && s.Length >= 7 && f.CurveSensor != null) {
+                        double tmin, tmax, rmin, rmax;
+                        double.TryParse(s[3], out tmin); double.TryParse(s[4], out tmax);
+                        double.TryParse(s[5], out rmin); double.TryParse(s[6], out rmax);
+                        f.CurveSensorKey = s[2]; f.CtMin = tmin; f.CtMax = tmax; f.CrMin = rmin; f.CrMax = rmax;
+                        // reflect saved values in the editor controls
+                        f.CtMinS.Value = tmin; f.CtMaxS.Value = tmax; f.CrMinS.Value = rmin; f.CrMaxS.Value = rmax;
+                        foreach (var obj in f.CurveSensor.Items) {
+                            var it = obj as ComboBoxItem;
+                            if (it != null && (it.Tag as string) == f.CurveSensorKey) { f.CurveSensor.SelectedItem = it; break; }
+                        }
+                        SetMode(f, "curve");   // the refresh loop will start driving it
+                    }
                     else { Smc.SetFanAuto(f.Index); SetMode(f, "auto"); }
                 } catch { }
             }
@@ -622,6 +793,19 @@ namespace RPMac {
                         foreach (var k in new List<string>(curatedLabels.Keys)) curated[k] = Smc.ReadTemp(k);
                         Dictionary<string, double> all = null;
                         if (showAll) { all = new Dictionary<string, double>(); foreach (var k in new List<string>(allLabels.Keys)) all[k] = Smc.ReadTemp(k); }
+
+                        // Drive any fan in curve mode. Runs on this background thread using the
+                        // cached curve values (set on the UI thread); only touches fans whose
+                        // CurMode is "curve", so auto/max/manual fans are never affected.
+                        if (Smc.WritesAllowed) {
+                            foreach (var f in fans) {
+                                if (f.CurMode != "curve" || f.CurveSensorKey == null) continue;
+                                double t = Smc.ReadTemp(f.CurveSensorKey);
+                                if (double.IsNaN(t)) continue;
+                                Smc.SetFanRpm(f.Index, CurveRpm(t, f.CtMin, f.CtMax, f.CrMin, f.CrMax));
+                            }
+                        }
+
                         Dispatcher.Invoke((Action)delegate {
                             foreach (var fi in infos) {
                                 if (fi.Index >= fans.Count) continue;
@@ -841,7 +1025,16 @@ namespace RPMac {
                     else if (s.Length >= 2 && s[0] == "ovorient") OverlayHorizontal = (s[1] == "h");
                     else if (s.Length >= 2 && s[0] == "ovsel") OverlayItems = new HashSet<string>(s[1].Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries));
                     else if (s.Length >= 2 && s[0] == "theme") Theme = s[1];
-                    else if (s.Length >= 4 && s[0] == "fan") { int idx; if (int.TryParse(s[1], out idx)) Fans[idx] = new string[] { s[2], s[3] }; }
+                    else if (s.Length >= 4 && s[0] == "fan") {
+                        int idx;
+                        if (int.TryParse(s[1], out idx)) {
+                            // store everything after the index: [mode, rpm] or
+                            // [curve, 0, sensor, tmin, tmax, rmin, rmax]
+                            var arr = new string[s.Length - 2];
+                            Array.Copy(s, 2, arr, 0, s.Length - 2);
+                            Fans[idx] = arr;
+                        }
+                    }
                 }
             } catch { }
         }
@@ -855,11 +1048,16 @@ namespace RPMac {
                 lines.Add("ovorient|" + (OverlayHorizontal ? "h" : "v"));
                 if (OverlayItems != null) lines.Add("ovsel|" + string.Join(",", new List<string>(OverlayItems).ToArray()));
                 lines.Add("theme|" + Theme);
-                foreach (var kv in Fans) lines.Add("fan|" + kv.Key + "|" + kv.Value[0] + "|" + kv.Value[1]);
+                foreach (var kv in Fans) lines.Add("fan|" + kv.Key + "|" + string.Join("|", kv.Value));
                 System.IO.File.WriteAllLines(FilePath, lines.ToArray());
             } catch { }
         }
         public static void SetFan(int idx, string mode, int rpm) { Fans[idx] = new string[] { mode, rpm.ToString() }; Save(); }
+        public static void SetFanCurve(int idx, string sensor, double tmin, double tmax, double rmin, double rmax) {
+            Fans[idx] = new string[] { "curve", "0", sensor,
+                ((int)tmin).ToString(), ((int)tmax).ToString(), ((int)rmin).ToString(), ((int)rmax).ToString() };
+            Save();
+        }
     }
 
     static class Startup {
