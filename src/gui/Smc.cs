@@ -55,28 +55,66 @@ namespace RPMac {
         static bool   useMmio = false;
         static IntPtr pawnHandle = IntPtr.Zero;
         public static bool MmioActive { get { return useMmio; } }
+        public static string MmioError = "";   // diagnostic detail when TryInitMmio fails
 
-        // Open PawnIO and load our signed T2 SMC module. Returns true on success.
+        // Open PawnIO and load our T2 SMC module. Returns true on success; on failure
+        // MmioError explains exactly which step failed so the UI can guide the user.
+        //
+        // PawnIO's LoadBinary expects a blob shaped as [4-byte sig_len][sig][AMX].
+        // A properly signed .bin already has that shape; a raw .amx does not. To be
+        // robust to either file, we try the file as-is first (signed .bin), and if that
+        // fails we retry it wrapped as [00 00 00 00][file] (unsigned .amx, which the
+        // PawnIO unrestricted edition accepts).
         static bool TryInitMmio() {
             try {
                 string dir = System.IO.Path.GetDirectoryName(
                     System.Reflection.Assembly.GetExecutingAssembly().Location);
                 string modPath = System.IO.Path.Combine(dir, T2_MODULE_FILE);
-                if (!System.IO.File.Exists(modPath)) return false; // module not bundled yet
-
-                IntPtr h = CreateFile(PAWNIO_DEVICE, GENERIC_RW, FILE_SHARE_RW, IntPtr.Zero,
-                                      OPEN_EXISTING, 0, IntPtr.Zero);
-                if (h == IntPtr.Zero || h == (IntPtr)(-1)) return false; // PawnIO not installed
-
-                byte[] blob = System.IO.File.ReadAllBytes(modPath);
-                uint ret;
-                if (!DeviceIoControl(h, PIO_LOAD_BINARY, blob, (uint)blob.Length, null, 0, out ret, IntPtr.Zero)) {
-                    CloseHandle(h); return false; // module rejected (unsigned / wrong key)
+                if (!System.IO.File.Exists(modPath)) {
+                    MmioError = "AppleT2Smc.bin not found next to RPMac.exe.";
+                    return false;
                 }
-                pawnHandle = h;
-                useMmio = true;
-                return true;
-            } catch { return false; }
+
+                byte[] file = System.IO.File.ReadAllBytes(modPath);
+
+                // Attempt 1: load as-is (a signed .bin, or our already-wrapped test .bin).
+                if (TryLoadBlob(file)) return true;
+                string firstErr = MmioError;
+
+                // Attempt 2: wrap as [sig_len = 0][AMX] in case the file is a raw .amx.
+                byte[] wrapped = new byte[4 + file.Length];
+                System.Buffer.BlockCopy(file, 0, wrapped, 4, file.Length);
+                if (TryLoadBlob(wrapped)) return true;
+
+                // Keep whichever error is most informative.
+                if (firstErr.IndexOf("CreateFile", System.StringComparison.Ordinal) >= 0)
+                    MmioError = firstErr;
+                return false;
+            } catch (System.Exception ex) {
+                MmioError = "T2 init exception: " + ex.GetType().Name + " - " + ex.Message;
+                return false;
+            }
+        }
+
+        // Open a fresh PawnIO handle and try to load one blob. On success stores the
+        // handle in pawnHandle and sets useMmio; on failure sets MmioError and cleans up.
+        static bool TryLoadBlob(byte[] blob) {
+            IntPtr h = CreateFile(PAWNIO_DEVICE, GENERIC_RW, FILE_SHARE_RW, IntPtr.Zero,
+                                  OPEN_EXISTING, 0, IntPtr.Zero);
+            if (h == IntPtr.Zero || h == (IntPtr)(-1)) {
+                MmioError = "PawnIO driver not reachable (CreateFile err " + Marshal.GetLastWin32Error() + "). Install PawnIO from pawnio.eu and reboot.";
+                return false;
+            }
+            uint ret;
+            if (!DeviceIoControl(h, PIO_LOAD_BINARY, blob, (uint)blob.Length, null, 0, out ret, IntPtr.Zero)) {
+                MmioError = "PawnIO refused the module (LoadBinary err " + Marshal.GetLastWin32Error() + "). Needs the PawnIO UNRESTRICTED edition for unsigned modules.";
+                CloseHandle(h);
+                return false;
+            }
+            pawnHandle = h;
+            useMmio = true;
+            MmioError = "";
+            return true;
         }
 
         // Call a PawnIO module function. input/output are arrays of 64-bit cells.
@@ -289,7 +327,7 @@ namespace RPMac {
                         WritesAllowed = false;
                         string t2hint = registrySaysApple && useMmio
                             ? " T2 module loaded but the SMC did not respond — the T2 register layout on this model may differ."
-                            : (registrySaysApple ? " Looks like a T2 Mac: install PawnIO (pawnio.eu) and keep AppleT2Smc.bin next to RPMac.exe to enable T2 support." : "");
+                            : (registrySaysApple ? " Looks like a T2 Mac. " + (MmioError != "" ? MmioError : "Install PawnIO (pawnio.eu) and keep AppleT2Smc.bin next to RPMac.exe.") : "");
                         SafetyReason = "SMC did not return a valid fan count (got " + (double.IsNaN(n) ? "NaN" : n.ToString()) + "). Read-only for safety." + t2hint;
                         return false;
                     }
