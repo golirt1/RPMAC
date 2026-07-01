@@ -1,3 +1,16 @@
+## RPMac v1.3.1
+
+**The other app capable of controlling fans on Intel Macs in Windows — for free.**
+
+### Fixed in 1.3.1
+- **Fixed RPMac becoming unreachable after a restart** — the window would flash and close while the process kept running (fans still spinning), with no way to get the GUI back. RPMac is now **single-instance**: launching it again brings the already-running window to the front instead of starting a hidden duplicate that fights over the SMC. Also added a tray fallback (it minimizes instead of vanishing if the tray icon can't be created) and writes any startup error to `%APPDATA%\RPMac\error.log`. Thanks to the reporter for the detailed video.
+
+### Download
+Download `RPMac-v1.3.1-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
+Keep `RPMac.exe`, `smccore.exe` and `inpout32.dll` together in the same folder.
+
+---
+
 ## RPMac v1.3.0
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**
