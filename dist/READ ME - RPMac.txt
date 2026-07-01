@@ -6,6 +6,8 @@ RPMac - Quick start
    (administrator rights are required to access the Mac's hardware/SMC).
 3. Set each fan to Auto / Max / a custom RPM, or use "Curve" to ramp the fan
    between a min and max temperature. Temperatures update live.
+   Tip: save your setup as a named preset and switch profiles with one click
+   (also from the tray icon: right-click -> Presets).
 
 Scripting (optional)
 --------------------

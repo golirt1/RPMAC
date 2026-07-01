@@ -1,3 +1,17 @@
+## RPMac v1.3.0
+
+**The other app capable of controlling fans on Intel Macs in Windows — for free.**
+
+### What's new in 1.3.0
+- **Presets (profiles).** Save your current fan setup as a named profile — e.g. "Silent", "Gaming", "Max" — and switch between them with one click. Each profile stores every fan's mode (Auto/Max/Manual/Curve) and its parameters. Apply them from the app or straight from the **tray icon** (right-click → Presets), without opening the window. The active profile is highlighted, and each shows a summary of what it does.
+- Overlay now re-asserts always-on-top each refresh, so it stays above games running in **borderless / windowed** mode (exclusive-fullscreen still can't be drawn over by any window overlay).
+
+### Download
+Download `RPMac-v1.3.0-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
+Keep `RPMac.exe`, `smccore.exe` and `inpout32.dll` together in the same folder.
+
+---
+
 ## RPMac v1.2.0
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**

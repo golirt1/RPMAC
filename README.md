@@ -40,6 +40,7 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 - Real-time fan RPM and temperature monitoring
 - Per-fan control: Auto / Max / custom RPM / **temperature curve**
 - **Per-fan temperature curve** — pick a sensor and ramp RPM between a min and max temperature
+- **Presets** — save your fan setup as named profiles (e.g. Silent, Gaming) and switch with one click, from the app or the tray icon
 - Command-line tool (`smccore.exe`) for scripting fan control
 - Curated, friendly temperature sensors (plus a raw view of every key)
 - On-screen overlay (FRAPS-style): always-on-top, top-right corner, vertical or horizontal, with selectable fans/sensors
@@ -54,7 +55,7 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 ## Install
 No installer needed — it's a portable app.
 
-1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.2.0-windows.zip` (under **Assets**).
+1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.3.0-windows.zip` (under **Assets**).
 2. **Unzip it** to any folder you like (e.g. your Desktop). Keep `RPMac.exe`, `smccore.exe` and `inpout32.dll` **together in the same folder**.
 3. **Right-click `RPMac.exe` → "Run as administrator"** (administrator rights are required to access the Mac's hardware/SMC).
 4. Set each fan to **Auto / Max / a custom RPM**. Temperatures update live.
