@@ -161,6 +161,23 @@ namespace RPMac {
       </ControlTemplate>
     </Setter.Value></Setter>
   </Style>
+  <Style TargetType=""TextBox"">
+    <Setter Property=""Foreground"" Value=""#EDEDED""/>
+    <Setter Property=""CaretBrush"" Value=""#EDEDED""/>
+    <Setter Property=""Background"" Value=""#2A2A32""/>
+    <Setter Property=""BorderBrush"" Value=""#3A3A42""/>
+    <Setter Property=""BorderThickness"" Value=""1""/>
+    <Setter Property=""Padding"" Value=""9,7,9,7""/>
+    <Setter Property=""VerticalContentAlignment"" Value=""Center""/>
+    <Setter Property=""Template""><Setter.Value>
+      <ControlTemplate TargetType=""TextBox"">
+        <Border Background=""{TemplateBinding Background}"" BorderBrush=""{TemplateBinding BorderBrush}""
+                BorderThickness=""{TemplateBinding BorderThickness}"" CornerRadius=""8"">
+          <ScrollViewer x:Name=""PART_ContentHost"" Margin=""{TemplateBinding Padding}"" VerticalAlignment=""Center""/>
+        </Border>
+      </ControlTemplate>
+    </Setter.Value></Setter>
+  </Style>
   <Style TargetType=""ScrollBar"">
     <Setter Property=""Width"" Value=""10""/>
     <Setter Property=""Background"" Value=""Transparent""/>
@@ -211,6 +228,11 @@ namespace RPMac {
         bool allLoaded = false;
         volatile bool showAll = false;
         TextBlock status;
+        StackPanel presetChips;     // vertical list, one row per saved preset
+        TextBox presetNameBox;      // name field for saving the current config
+        TextBlock presetPlaceholder; // faux placeholder for the name field
+        string activePreset;        // name of the preset currently applied (null = none / custom)
+        System.Windows.Forms.ToolStripMenuItem trayPresetsItem;  // tray "Presets" submenu
         volatile bool running = true;
         const double BAR_W = 404;
         System.Windows.Forms.NotifyIcon tray;
@@ -269,6 +291,7 @@ namespace RPMac {
             }
 
             BuildFans(stack);
+            BuildPresetsCard(stack);
             BuildTempsCard(stack);
             BuildSettingsCard(stack);
 
@@ -371,6 +394,7 @@ namespace RPMac {
             f.CurveSensorKey = key; f.CtMin = tmin; f.CtMax = tmax; f.CrMin = rmin; f.CrMax = rmax;
             SetMode(f, "curve");
             Settings.SetFanCurve(f.Index, key, tmin, tmax, rmin, rmax);
+            ClearActivePreset();
             status.Text = string.Format("Fan {0}: curve on · {1} {2:0}–{3:0}°C → {4:0}–{5:0} RPM",
                 f.Index, key, tmin, tmax, rmin, rmax);
         }
@@ -407,8 +431,8 @@ namespace RPMac {
                 col.Children.Add(f.Info);
 
                 var chips = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 12) };
-                f.Auto = Chip("Auto", CHIP, TXT, delegate { if (!Guard()) return; Smc.SetFanAuto(f.Index); SetMode(f, "auto"); Settings.SetFan(f.Index, "auto", 0); });
-                f.MaxBtn = Chip("Max", CHIP, TXT, delegate { if (!Guard()) return; Smc.SetFanMax(f.Index); SetMode(f, "max"); Settings.SetFan(f.Index, "max", 0); });
+                f.Auto = Chip("Auto", CHIP, TXT, delegate { if (!Guard()) return; Smc.SetFanAuto(f.Index); SetMode(f, "auto"); Settings.SetFan(f.Index, "auto", 0); ClearActivePreset(); });
+                f.MaxBtn = Chip("Max", CHIP, TXT, delegate { if (!Guard()) return; Smc.SetFanMax(f.Index); SetMode(f, "max"); Settings.SetFan(f.Index, "max", 0); ClearActivePreset(); });
                 f.Manual = Chip("Manual", CHIP, TXT, delegate { if (!Guard()) return; SetMode(f, "manual"); });
                 chips.Children.Add(f.Auto); chips.Children.Add(f.MaxBtn); chips.Children.Add(f.Manual);
                 if (availSensors.Count > 0) {
@@ -428,7 +452,7 @@ namespace RPMac {
                 col.Children.Add(manualRow);
                 f.ManualRow = manualRow;
 
-                var apply = Chip("Apply RPM", ACCENT, Brushes.White, delegate { if (!Guard()) return; Smc.SetFanRpm(f.Index, f.Slider.Value); SetMode(f, "manual"); Settings.SetFan(f.Index, "manual", (int)f.Slider.Value); });
+                var apply = Chip("Apply RPM", ACCENT, Brushes.White, delegate { if (!Guard()) return; Smc.SetFanRpm(f.Index, f.Slider.Value); SetMode(f, "manual"); Settings.SetFan(f.Index, "manual", (int)f.Slider.Value); ClearActivePreset(); });
                 apply.Margin = new Thickness(0, 12, 0, 0);
                 apply.HorizontalAlignment = HorizontalAlignment.Left;
                 col.Children.Add(apply);
@@ -708,8 +732,30 @@ namespace RPMac {
                 tray.DoubleClick += delegate { ShowFromTray(); };
                 var menu = new System.Windows.Forms.ContextMenuStrip();
                 menu.Items.Add("Open", null, delegate { ShowFromTray(); });
+                trayPresetsItem = new System.Windows.Forms.ToolStripMenuItem("Presets");
+                menu.Items.Add(trayPresetsItem);
                 menu.Items.Add("Quit", null, delegate { QuitApp(); });
                 tray.ContextMenuStrip = menu;
+                UpdateTrayPresets();
+            } catch { }
+        }
+
+        // Rebuild the tray "Presets" submenu so you can switch presets without opening the window.
+        void UpdateTrayPresets() {
+            if (trayPresetsItem == null) return;
+            try {
+                trayPresetsItem.DropDownItems.Clear();
+                if (Settings.Presets.Count == 0) {
+                    var none = new System.Windows.Forms.ToolStripMenuItem("(no presets yet)") { Enabled = false };
+                    trayPresetsItem.DropDownItems.Add(none);
+                    return;
+                }
+                foreach (var name in Settings.Presets.Keys) {
+                    string n = name;
+                    var item = new System.Windows.Forms.ToolStripMenuItem(n) { Checked = (n == activePreset) };
+                    item.Click += delegate { if (Guard()) ApplyPreset(n); };
+                    trayPresetsItem.DropDownItems.Add(item);
+                }
             } catch { }
         }
         void ShowFromTray() { Show(); WindowState = WindowState.Normal; ShowInTaskbar = true; Activate(); }
@@ -747,27 +793,216 @@ namespace RPMac {
             if (!Smc.WritesAllowed) return;
             foreach (var f in fans) {
                 if (!Settings.Fans.ContainsKey(f.Index)) continue;
-                var s = Settings.Fans[f.Index];
-                string mode = s[0]; int rpm = 0; if (s.Length > 1) int.TryParse(s[1], out rpm);
-                try {
-                    if (mode == "max") { Smc.SetFanMax(f.Index); SetMode(f, "max"); }
-                    else if (mode == "manual") { Smc.SetFanRpm(f.Index, rpm); f.Slider.Value = rpm; SetMode(f, "manual"); }
-                    else if (mode == "curve" && s.Length >= 7 && f.CurveSensor != null) {
-                        double tmin, tmax, rmin, rmax;
-                        double.TryParse(s[3], out tmin); double.TryParse(s[4], out tmax);
-                        double.TryParse(s[5], out rmin); double.TryParse(s[6], out rmax);
-                        f.CurveSensorKey = s[2]; f.CtMin = tmin; f.CtMax = tmax; f.CrMin = rmin; f.CrMax = rmax;
-                        // reflect saved values in the editor controls
-                        f.CtMinS.Value = tmin; f.CtMaxS.Value = tmax; f.CrMinS.Value = rmin; f.CrMaxS.Value = rmax;
-                        foreach (var obj in f.CurveSensor.Items) {
-                            var it = obj as ComboBoxItem;
-                            if (it != null && (it.Tag as string) == f.CurveSensorKey) { f.CurveSensor.SelectedItem = it; break; }
-                        }
-                        SetMode(f, "curve");   // the refresh loop will start driving it
-                    }
-                    else { Smc.SetFanAuto(f.Index); SetMode(f, "auto"); }
-                } catch { }
+                ApplyFanState(f, Settings.Fans[f.Index]);
             }
+        }
+
+        // Apply one saved fan state ([mode, rpm] or the curve form) to a fan: sets the SMC,
+        // updates the UI controls and switches the mode. Shared by startup restore and presets.
+        void ApplyFanState(FanUi f, string[] s) {
+            if (s == null || s.Length < 1) return;
+            string mode = s[0]; int rpm = 0; if (s.Length > 1) int.TryParse(s[1], out rpm);
+            try {
+                if (mode == "max") { Smc.SetFanMax(f.Index); SetMode(f, "max"); }
+                else if (mode == "manual") { Smc.SetFanRpm(f.Index, rpm); f.Slider.Value = rpm; SetMode(f, "manual"); }
+                else if (mode == "curve" && s.Length >= 7 && f.CurveSensor != null) {
+                    double tmin, tmax, rmin, rmax;
+                    double.TryParse(s[3], out tmin); double.TryParse(s[4], out tmax);
+                    double.TryParse(s[5], out rmin); double.TryParse(s[6], out rmax);
+                    f.CurveSensorKey = s[2]; f.CtMin = tmin; f.CtMax = tmax; f.CrMin = rmin; f.CrMax = rmax;
+                    f.CtMinS.Value = tmin; f.CtMaxS.Value = tmax; f.CrMinS.Value = rmin; f.CrMaxS.Value = rmax;
+                    foreach (var obj in f.CurveSensor.Items) {
+                        var it = obj as ComboBoxItem;
+                        if (it != null && (it.Tag as string) == f.CurveSensorKey) { f.CurveSensor.SelectedItem = it; break; }
+                    }
+                    SetMode(f, "curve");   // the refresh loop will start driving it
+                }
+                else { Smc.SetFanAuto(f.Index); SetMode(f, "auto"); }
+            } catch { }
+        }
+
+        // Snapshot a fan's current mode + parameters into the saved-string form.
+        string[] FanStateToArray(FanUi f) {
+            switch (f.CurMode) {
+                case "max":    return new[] { "max", "0" };
+                case "manual": return new[] { "manual", ((int)f.Slider.Value).ToString() };
+                case "curve":  return new[] { "curve", "0", f.CurveSensorKey ?? "",
+                                   ((int)f.CtMin).ToString(), ((int)f.CtMax).ToString(),
+                                   ((int)f.CrMin).ToString(), ((int)f.CrMax).ToString() };
+                default:       return new[] { "auto", "0" };
+            }
+        }
+
+        // ---- Presets: a named snapshot of every fan's mode + parameters ----
+        void BuildPresetsCard(Panel parent) {
+            if (fans.Count == 0) return;   // nothing to save on read-only hardware
+            var col = new StackPanel();
+            col.Children.Add(new TextBlock { Text = "Presets", FontSize = 15, FontWeight = FontWeights.Bold, Foreground = TXT, Margin = new Thickness(0, 0, 0, 4) });
+            col.Children.Add(new TextBlock { Text = "Save your current fan setup as a profile and switch with one click.", FontSize = 12, Foreground = SUB, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 12) });
+
+            presetChips = new StackPanel();   // vertical list of profile rows
+            col.Children.Add(presetChips);
+
+            // ---- "save current" area, visually separated from the list ----
+            var saveWrap = new Border {
+                Background = CHIP, CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(12, 10, 12, 12), Margin = new Thickness(0, 6, 0, 0)
+            };
+            var saveCol = new StackPanel();
+            saveCol.Children.Add(new TextBlock { Text = "SAVE CURRENT SETUP", FontSize = 10.5, FontWeight = FontWeights.SemiBold, Foreground = SUB, Margin = new Thickness(2, 0, 0, 7) });
+
+            var saveRow = new StackPanel { Orientation = Orientation.Horizontal };
+            // name field with a faux placeholder
+            var nameHost = new Grid { Width = 210, VerticalAlignment = VerticalAlignment.Center };
+            presetNameBox = new TextBox { VerticalAlignment = VerticalAlignment.Center, Background = BG };
+            presetPlaceholder = new TextBlock { Text = "Profile name (e.g. Gaming)", Foreground = SUB, FontSize = 12.5, Margin = new Thickness(11, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center, IsHitTestVisible = false };
+            presetNameBox.TextChanged += delegate { presetPlaceholder.Visibility = string.IsNullOrEmpty(presetNameBox.Text) ? Visibility.Visible : Visibility.Collapsed; };
+            presetNameBox.KeyDown += delegate (object s, System.Windows.Input.KeyEventArgs e) {
+                if (e.Key == System.Windows.Input.Key.Enter && Guard()) SaveCurrentAsPreset(presetNameBox.Text);
+            };
+            nameHost.Children.Add(presetNameBox);
+            nameHost.Children.Add(presetPlaceholder);
+
+            var saveBtn = Chip("Save", ACCENT, Brushes.White, delegate { if (!Guard()) return; SaveCurrentAsPreset(presetNameBox.Text); });
+            saveBtn.Margin = new Thickness(10, 0, 0, 0);
+            saveRow.Children.Add(nameHost);
+            saveRow.Children.Add(saveBtn);
+            saveCol.Children.Add(saveRow);
+            saveWrap.Child = saveCol;
+            col.Children.Add(saveWrap);
+
+            if (!Smc.WritesAllowed) { presetNameBox.IsEnabled = false; saveBtn.Opacity = 0.45; saveWrap.Opacity = 0.6; }
+
+            parent.Children.Add(Card(col));
+            RebuildPresetChips();
+        }
+
+        void RebuildPresetChips() {
+            if (presetChips == null) return;
+            presetChips.Children.Clear();
+            if (Settings.Presets.Count == 0) {
+                presetChips.Children.Add(new TextBlock { Text = "No profiles yet. Set up your fans below and save one.", Foreground = SUB, FontSize = 12, Margin = new Thickness(2, 2, 0, 10), FontStyle = FontStyles.Italic });
+                return;
+            }
+            foreach (var name in Settings.Presets.Keys) presetChips.Children.Add(PresetRow(name));
+        }
+
+        // A full-width profile row: name + a one-line summary of what it does, an Apply button
+        // and a delete (×). The active profile is highlighted with an accent border.
+        Border PresetRow(string name) {
+            bool active = (name == activePreset);
+
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            // left: name (+ active dot) and summary line
+            var left = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            var nameLine = new StackPanel { Orientation = Orientation.Horizontal };
+            if (active) nameLine.Children.Add(new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), Background = ACCENT, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 7, 0) });
+            nameLine.Children.Add(new TextBlock { Text = name, Foreground = TXT, FontSize = 14, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+            left.Children.Add(nameLine);
+            left.Children.Add(new TextBlock { Text = PresetSummary(name, "  ·  "), Foreground = SUB, FontSize = 11.5, Margin = new Thickness(0, 2, 0, 0), TextTrimming = TextTrimming.CharacterEllipsis });
+            Grid.SetColumn(left, 0);
+            grid.Children.Add(left);
+
+            // right: Apply + delete
+            var actions = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 0, 0, 0) };
+            var applyBtn = new Border {
+                Background = active ? ACCENT : BG, CornerRadius = new CornerRadius(7),
+                Padding = new Thickness(14, 7, 14, 7), Cursor = Cursors.Hand,
+                Child = new TextBlock { Text = active ? "Active" : "Apply", Foreground = active ? Brushes.White : TXT, FontSize = 12.5, FontWeight = FontWeights.SemiBold }
+            };
+            applyBtn.MouseEnter += delegate { applyBtn.Opacity = 0.82; };
+            applyBtn.MouseLeave += delegate { applyBtn.Opacity = 1.0; };
+            applyBtn.MouseLeftButtonUp += delegate { if (!Guard()) return; ApplyPreset(name); };
+            var delBtn = new TextBlock { Text = "✕", Foreground = SUB, FontSize = 13, Cursor = Cursors.Hand, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 4, 0) };
+            delBtn.MouseEnter += delegate { delBtn.Foreground = RED; };
+            delBtn.MouseLeave += delegate { delBtn.Foreground = SUB; };
+            delBtn.MouseLeftButtonUp += delegate { DeletePreset(name); };
+            actions.Children.Add(applyBtn);
+            actions.Children.Add(delBtn);
+            Grid.SetColumn(actions, 1);
+            grid.Children.Add(actions);
+
+            var bd = new Border {
+                Background = CHIP,
+                BorderBrush = active ? ACCENT : BORDER,
+                BorderThickness = new Thickness(active ? 1.4 : 1),
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(14, 11, 12, 11),
+                Margin = new Thickness(0, 0, 0, 8),
+                Child = grid
+            };
+            if (!Smc.WritesAllowed) bd.Opacity = 0.45;
+            return bd;
+        }
+
+        // One-line-per-fan summary of a preset, joined with the given separator.
+        string PresetSummary(string name, string sep) {
+            Dictionary<int, string[]> p;
+            if (!Settings.Presets.TryGetValue(name, out p)) return name;
+            var parts = new List<string>();
+            foreach (var kv in p) {
+                var s = kv.Value;
+                string desc;
+                switch (s.Length > 0 ? s[0] : "auto") {
+                    case "max":    desc = "Max"; break;
+                    case "manual": desc = (s.Length > 1 ? s[1] : "?") + " RPM"; break;
+                    case "curve":  desc = s.Length >= 7 ? ("Curve " + s[2] + " " + s[3] + "-" + s[4] + "°C") : "Curve"; break;
+                    default:       desc = "Auto"; break;
+                }
+                parts.Add("Fan " + kv.Key + " " + desc);
+            }
+            return string.Join(sep, parts.ToArray());
+        }
+
+        void ApplyPreset(string name) {
+            Dictionary<int, string[]> preset;
+            if (!Settings.Presets.TryGetValue(name, out preset)) return;
+            foreach (var f in fans) {
+                string[] s;
+                if (!preset.TryGetValue(f.Index, out s)) continue;
+                ApplyFanState(f, s);
+                Settings.Fans[f.Index] = s;   // also becomes the current saved state
+            }
+            Settings.Save();
+            activePreset = name;
+            RebuildPresetChips();             // highlight the active one
+            UpdateTrayPresets();
+            status.Text = "Applied preset: " + name;
+        }
+
+        void SaveCurrentAsPreset(string name) {
+            name = (name ?? "").Trim().Replace("|", " ");   // '|' is the config separator
+            if (name == "") { status.Text = "Type a name for the preset first."; return; }
+            var snap = new Dictionary<int, string[]>();
+            foreach (var f in fans) snap[f.Index] = FanStateToArray(f);
+            Settings.Presets[name] = snap;
+            Settings.Save();
+            presetNameBox.Text = "";
+            activePreset = name;              // the just-saved config is now the active preset
+            RebuildPresetChips();
+            UpdateTrayPresets();
+            status.Text = "Saved preset: " + name;
+        }
+
+        void DeletePreset(string name) {
+            if (Settings.Presets.Remove(name)) {
+                if (activePreset == name) activePreset = null;
+                Settings.Save();
+                RebuildPresetChips();
+                UpdateTrayPresets();
+                status.Text = "Deleted preset: " + name;
+            }
+        }
+
+        // The user changed a fan by hand, so no saved preset matches anymore — clear the highlight.
+        void ClearActivePreset() {
+            if (activePreset == null) return;
+            activePreset = null;
+            RebuildPresetChips();
+            UpdateTrayPresets();
         }
 
         // Al reanudar de suspension/hibernacion el SMC suele perder el modo forzado
@@ -1022,6 +1257,8 @@ namespace RPMac {
         static readonly string Dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RPMac");
         static readonly string FilePath = System.IO.Path.Combine(Dir, "config.txt");
         public static Dictionary<int, string[]> Fans = new Dictionary<int, string[]>();
+        // preset name -> (fan index -> saved state), same state form as Fans
+        public static Dictionary<string, Dictionary<int, string[]>> Presets = new Dictionary<string, Dictionary<int, string[]>>();
         public static bool StartMinimized = false;
         public static bool Fahrenheit = false;
         public static bool Overlay = false;
@@ -1050,6 +1287,17 @@ namespace RPMac {
                             Fans[idx] = arr;
                         }
                     }
+                    // preset|<name>|<fanIndex>|<mode>|<rpm>[|curve fields...]
+                    else if (s.Length >= 5 && s[0] == "preset") {
+                        string pname = s[1];
+                        int idx;
+                        if (int.TryParse(s[2], out idx)) {
+                            if (!Presets.ContainsKey(pname)) Presets[pname] = new Dictionary<int, string[]>();
+                            var arr = new string[s.Length - 3];
+                            Array.Copy(s, 3, arr, 0, s.Length - 3);
+                            Presets[pname][idx] = arr;
+                        }
+                    }
                 }
             } catch { }
         }
@@ -1064,6 +1312,9 @@ namespace RPMac {
                 if (OverlayItems != null) lines.Add("ovsel|" + string.Join(",", new List<string>(OverlayItems).ToArray()));
                 lines.Add("theme|" + Theme);
                 foreach (var kv in Fans) lines.Add("fan|" + kv.Key + "|" + string.Join("|", kv.Value));
+                foreach (var p in Presets)
+                    foreach (var kv in p.Value)
+                        lines.Add("preset|" + p.Key + "|" + kv.Key + "|" + string.Join("|", kv.Value));
                 System.IO.File.WriteAllLines(FilePath, lines.ToArray());
             } catch { }
         }
