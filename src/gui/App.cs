@@ -296,12 +296,14 @@ namespace RPMac {
             BuildSettingsCard(stack);
 
             Loaded += delegate {
-                SetupTray();
-                ApplySaved();
-                StartRefresh();
-                Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerChange;
-                if (Settings.Overlay) ShowOverlay();
-                if (Settings.StartMinimized) HideToTray();
+                try {
+                    SetupTray();
+                    ApplySaved();
+                    StartRefresh();
+                    Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerChange;
+                    if (Settings.Overlay) ShowOverlay();
+                    if (Settings.StartMinimized) HideToTray();
+                } catch (Exception ex) { App.LogError("Loaded", ex); }
             };
             StateChanged += delegate { if (WindowState == WindowState.Minimized) HideToTray(); };
             Closing += delegate (object s2, System.ComponentModel.CancelEventArgs e2) { if (!quitting) { e2.Cancel = true; HideToTray(); } };
@@ -758,8 +760,25 @@ namespace RPMac {
                 }
             } catch { }
         }
-        void ShowFromTray() { Show(); WindowState = WindowState.Normal; ShowInTaskbar = true; Activate(); }
-        void HideToTray() { Hide(); ShowInTaskbar = false; }
+        void ShowFromTray() { ForceShow(); }
+        // Bring the window back and to the front. Public so a second launch (via the
+        // single-instance guard in App.Main) can surface the already-running window.
+        public void ForceShow() {
+            try {
+                Show();
+                WindowState = WindowState.Normal;
+                ShowInTaskbar = true;
+                Activate();
+                Topmost = true; Topmost = false;   // pop to front without staying on top
+                Focus();
+            } catch { }
+        }
+        // Hide to the tray — but if the tray icon couldn't be created, minimize instead of
+        // vanishing, so the window can never become unreachable.
+        void HideToTray() {
+            if (tray == null) { WindowState = WindowState.Minimized; return; }
+            Hide(); ShowInTaskbar = false;
+        }
         void QuitApp() {
             quitting = true;
             try { if (tray != null) tray.Visible = false; } catch { }
@@ -1344,10 +1363,50 @@ namespace RPMac {
     }
 
     public class App {
+        static Mutex mutex;
+
         [STAThread]
         public static void Main() {
+            // Single instance: if RPMac is already running, ask that instance to surface its
+            // window and exit — so a second launch never spawns a hidden duplicate fighting
+            // over the SMC. (This is exactly what a user does when the window seems "gone".)
+            bool createdNew;
+            mutex = new Mutex(true, "RPMac_singleton_v1", out createdNew);
+            if (!createdNew) {
+                try { EventWaitHandle.OpenExisting("RPMac_show_v1").Set(); } catch { }
+                return;
+            }
+            var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, "RPMac_show_v1");
+
             var app = new Application();
-            app.Run(new MainWindow());
+
+            // Never let a stray UI-thread exception kill the window: log it and keep running.
+            app.DispatcherUnhandledException += delegate (object s, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e) {
+                LogError("UI", e.Exception);
+                e.Handled = true;
+            };
+
+            var win = new MainWindow();
+
+            // Wait for other launches to ping us, then bring the window to the front.
+            var waiter = new Thread(delegate () {
+                while (true) {
+                    try { showEvent.WaitOne(); } catch { break; }
+                    try { app.Dispatcher.BeginInvoke(new Action(delegate { win.ForceShow(); })); } catch { }
+                }
+            }) { IsBackground = true };
+            waiter.Start();
+
+            app.Run(win);
+            GC.KeepAlive(mutex);
+        }
+
+        internal static void LogError(string where, Exception ex) {
+            try {
+                string dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RPMac");
+                if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);
+                System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "error.log"), DateTime.Now + " [" + where + "] " + ex + "\r\n\r\n");
+            } catch { }
         }
     }
 }
