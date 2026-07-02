@@ -48,6 +48,9 @@ if errorlevel 1 (
   exit /b 1
 )
 
+REM App config (enables catching corrupted-state exceptions so startup crashes are logged).
+copy /y "%ROOT%src\gui\RPMac.exe.config" "%ROOT%build\RPMac.exe.config" >nul 2>&1
+
 REM Copy inpout32.dll. If RPMac is running it holds the DLL open; that's fine,
 REM the existing copy is identical, so don't fail the build over it.
 copy /y "%ROOT%third_party\InpOut32\inpout32.dll" "%ROOT%build\inpout32.dll" >nul 2>&1

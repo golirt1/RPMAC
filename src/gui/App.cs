@@ -296,14 +296,14 @@ namespace RPMac {
             BuildSettingsCard(stack);
 
             Loaded += delegate {
-                try {
-                    SetupTray();
-                    ApplySaved();
-                    StartRefresh();
-                    Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerChange;
-                    if (Settings.Overlay) ShowOverlay();
-                    if (Settings.StartMinimized) HideToTray();
-                } catch (Exception ex) { App.LogError("Loaded", ex); }
+                // Each step is isolated so one failure can't take down startup or hide the
+                // window, and the log tells us exactly which step failed.
+                try { SetupTray(); }    catch (Exception ex) { App.LogError("SetupTray", ex); }
+                try { ApplySaved(); }   catch (Exception ex) { App.LogError("ApplySaved", ex); }
+                try { StartRefresh(); } catch (Exception ex) { App.LogError("StartRefresh", ex); }
+                try { Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerChange; } catch (Exception ex) { App.LogError("PowerHook", ex); }
+                try { if (Settings.Overlay) ShowOverlay(); } catch (Exception ex) { App.LogError("Overlay", ex); }
+                try { if (Settings.StartMinimized) HideToTray(); } catch (Exception ex) { App.LogError("HideToTray", ex); }
             };
             StateChanged += delegate { if (WindowState == WindowState.Minimized) HideToTray(); };
             Closing += delegate (object s2, System.ComponentModel.CancelEventArgs e2) { if (!quitting) { e2.Cancel = true; HideToTray(); } };
@@ -1378,6 +1378,12 @@ namespace RPMac {
             }
             var showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, "RPMac_show_v1");
 
+            // Last-resort logger: catches unhandled exceptions on any thread (including the
+            // constructor and native/corrupted-state failures) so a startup crash is recorded.
+            AppDomain.CurrentDomain.UnhandledException += delegate (object s, UnhandledExceptionEventArgs ea) {
+                LogError("Fatal", ea.ExceptionObject as Exception);
+            };
+
             var app = new Application();
 
             // Never let a stray UI-thread exception kill the window: log it and keep running.
@@ -1405,7 +1411,8 @@ namespace RPMac {
             try {
                 string dir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RPMac");
                 if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);
-                System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "error.log"), DateTime.Now + " [" + where + "] " + ex + "\r\n\r\n");
+                string msg = (ex == null) ? "(no exception object)" : ex.ToString();
+                System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "error.log"), DateTime.Now + " [" + where + "] " + msg + "\r\n\r\n");
             } catch { }
         }
     }
