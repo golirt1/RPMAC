@@ -1,3 +1,17 @@
+## RPMac v1.3.2
+
+**The other app capable of controlling fans on Intel Macs in Windows — for free.**
+
+### Fixed in 1.3.2
+- **Hardened startup so it can't silently die.** Some machines reported RPMac flashing and closing on the next launch when a saved `config.txt` was present (with nothing written to the error log). The startup path is now fully isolated step-by-step, and **corrupted-state / native exceptions** (e.g. from the low-level I/O driver while re-applying the saved config) are now caught and logged instead of killing the process. Any startup problem is written to `%APPDATA%\RPMac\error.log`. If it still happens, that log now pinpoints the exact cause.
+- Fixed the manual build command in the README — it was missing `System.Windows.Forms` and `System.Drawing` (needed by the tray icon) — and documented `build.bat`. Thanks to @I-Love-Potatoes for both findings.
+
+### Download
+Download `RPMac-v1.3.2-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
+Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` together in the same folder.
+
+---
+
 ## RPMac v1.3.1
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**

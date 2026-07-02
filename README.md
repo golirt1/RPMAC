@@ -55,8 +55,8 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 ## Install
 No installer needed — it's a portable app.
 
-1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.3.1-windows.zip` (under **Assets**).
-2. **Unzip it** to any folder you like (e.g. your Desktop). Keep `RPMac.exe`, `smccore.exe` and `inpout32.dll` **together in the same folder**.
+1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.3.2-windows.zip` (under **Assets**).
+2. **Unzip it** to any folder you like (e.g. your Desktop). Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` **together in the same folder**.
 3. **Right-click `RPMac.exe` → "Run as administrator"** (administrator rights are required to access the Mac's hardware/SMC).
 4. Set each fan to **Auto / Max / a custom RPM**. Temperatures update live.
 
@@ -140,14 +140,34 @@ RPMac uses the public Apple SMC protocol (the same one documented in the Linux `
 - Administrator rights (required for hardware I/O)
 
 ## Build
-Compiles with the .NET Framework C# compiler already present on Windows — no Visual Studio needed:
+Compiles with the .NET Framework C# compiler already present on Windows — no Visual Studio needed.
+
+The easiest way is the included **`build.bat`** (from the repo root):
 ```
-csc /noconfig /target:winexe /platform:x86 /win32manifest:src\gui\app.manifest /out:build\RPMac.exe ^
-    /reference:System.dll /reference:System.Core.dll /reference:System.Xaml.dll ^
-    /reference:WPF\WindowsBase.dll /reference:WPF\PresentationCore.dll /reference:WPF\PresentationFramework.dll ^
+build.bat
+```
+It compiles `RPMac.exe` and `smccore.exe` into `build\` and copies `inpout32.dll` and
+`RPMac.exe.config` next to them.
+
+To compile `RPMac.exe` by hand instead, from the repo root:
+```
+mkdir build
+csc /noconfig /target:winexe /platform:x86 ^
+    /win32manifest:src\gui\app.manifest ^
+    /out:build\RPMac.exe ^
+    /reference:System.dll ^
+    /reference:System.Core.dll ^
+    /reference:System.Xaml.dll ^
+    /reference:System.Windows.Forms.dll ^
+    /reference:System.Drawing.dll ^
+    /reference:WPF\WindowsBase.dll ^
+    /reference:WPF\PresentationCore.dll ^
+    /reference:WPF\PresentationFramework.dll ^
     src\gui\Smc.cs src\gui\App.cs
 ```
-`inpout32.dll` must sit next to `RPMac.exe`.
+`csc.exe` lives in `%WINDIR%\Microsoft.NET\Framework\v4.0.30319`. Keep `inpout32.dll` and
+`RPMac.exe.config` next to `RPMac.exe` when you run it. (`System.Windows.Forms` and
+`System.Drawing` are required — the tray icon uses them.)
 
 ## License
 **GPL-2.0-only.** See `LICENSE`.
