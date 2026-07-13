@@ -1,7 +1,8 @@
-﻿// RPMac - GUI (WPF, codigo puro, tema oscuro moderno)
+// RPMac - GUI (WPF, codigo puro, tema oscuro moderno)
 // Copyright (C) 2026 golirt1 - GPL-2.0-only. Ver LICENSE y NOTICE.
 
 using System;
+using System.Drawing.Drawing2D;
 using System.Collections.Generic;
 using System.Threading;
 using System.Windows;
@@ -235,6 +236,8 @@ namespace RPMac {
         System.Windows.Forms.ToolStripMenuItem trayPresetsItem;  // tray "Presets" submenu
         volatile bool running = true;
         const double BAR_W = 404;
+        ComboBox trayModeCombo;     // "Show in tray" dropdown
+        System.Drawing.Icon staticIcon;  // cached default "R" icon
         System.Windows.Forms.NotifyIcon tray;
         bool quitting = false;
 
@@ -248,6 +251,12 @@ namespace RPMac {
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             TextOptions.SetTextFormattingMode(this, TextFormattingMode.Ideal);
 
+            // Named brush resources so the STYLES XAML (ComboBox/TextBox templates) can use
+            // DynamicResource and follow the live theme instead of hardcoded dark-theme hex colors.
+            Resources["ThemeText"] = TXT;
+            Resources["ThemeControlBg"] = CHIP;
+            Resources["ThemeBorder"] = BORDER;
+            Resources["ThemeAccent"] = ACCENT;
             try { Resources.MergedDictionaries.Add((ResourceDictionary)XamlReader.Parse(STYLES)); } catch { }
             Settings.Load();
             ApplyTheme(Settings.Theme); // colorea la paleta antes de construir la UI
@@ -595,6 +604,7 @@ namespace RPMac {
                     Settings.Theme = key; Settings.Save();
                     ApplyTheme(key);
                     SelectThemeChips();
+                    ApplyTrayMode(null); // refresh tray digit color for the new theme
                     status.Text = "Theme: " + label;
                 };
                 themeChips[key] = bd; themeChipLabels[key] = tb;
@@ -660,6 +670,41 @@ namespace RPMac {
             row3.Children.Add(toggle3);
             row3.Children.Add(labels3);
             col.Children.Add(row3);
+
+            // ---- Show in tray (dropdown) ----
+            var rowTray = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 14, 0, 0) };
+            var labelsTray = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            labelsTray.Children.Add(new TextBlock { Text = "Show in tray", Foreground = TXT, FontSize = 13, FontWeight = FontWeights.SemiBold });
+            labelsTray.Children.Add(new TextBlock { Text = "Choose what the tray icon displays — the app icon, nothing, or a live temperature.", Foreground = SUB, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) });
+            trayModeCombo = new ComboBox { Width = 170, VerticalAlignment = VerticalAlignment.Center };
+            trayModeCombo.Items.Add(new ComboBoxItem { Content = "App Icon", Tag = "icon" });
+            trayModeCombo.Items.Add(new ComboBoxItem { Content = "None", Tag = "none" });
+            trayModeCombo.Items.Add(new ComboBoxItem { Content = "Highest Temp", Tag = "highest" });
+            foreach (var c in CURATED) {
+                double v = Smc.ReadTemp(c[0]);
+                if (!double.IsNaN(v) && v >= 5 && v <= 120)
+                    trayModeCombo.Items.Add(new ComboBoxItem { Content = c[1], Tag = c[0] });
+            }
+            // Select the saved tray mode
+            bool found = false;
+            foreach (var obj in trayModeCombo.Items) {
+                var ci = obj as ComboBoxItem;
+                if (ci != null && (ci.Tag as string) == Settings.TrayMode) { trayModeCombo.SelectedItem = ci; found = true; break; }
+            }
+            if (!found) trayModeCombo.SelectedIndex = 0;
+            trayModeCombo.SelectionChanged += delegate {
+                var sel = trayModeCombo.SelectedItem as ComboBoxItem;
+                if (sel != null) {
+                    Settings.TrayMode = sel.Tag as string ?? "icon";
+                    Settings.Save();
+                    ApplyTrayMode(null);
+                    status.Text = "Show in tray: " + (sel.Content as string);
+                }
+            };
+            DockPanel.SetDock(trayModeCombo, Dock.Right);
+            rowTray.Children.Add(trayModeCombo);
+            rowTray.Children.Add(labelsTray);
+            col.Children.Add(rowTray);
 
             var row4 = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 14, 0, 0) };
             var labels4 = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
@@ -773,10 +818,10 @@ namespace RPMac {
                 Focus();
             } catch { }
         }
-        // Hide to the tray — but if the tray icon couldn't be created, minimize instead of
-        // vanishing, so the window can never become unreachable.
+        // Hide to the tray — but if the tray icon couldn't be created or tray is hidden
+        // ("none" mode), minimize instead of vanishing, so the window can never become unreachable.
         void HideToTray() {
-            if (tray == null) { WindowState = WindowState.Minimized; return; }
+            if (tray == null || Settings.TrayMode == "none") { WindowState = WindowState.Minimized; return; }
             Hide(); ShowInTaskbar = false;
         }
         void QuitApp() {
@@ -805,6 +850,156 @@ namespace RPMac {
                 }
                 return System.Drawing.Icon.FromHandle(bmp.GetHicon());
             } catch { return System.Drawing.SystemIcons.Application; }
+        }
+
+        // ---- Seven-segment temperature icon for the system tray ----
+        // Segment map for digits 0-9.  Bits: g f e d c b a  (bit 0 = segment a = top)
+        //   --a--
+        //  |     |
+        //  f     b
+        //  |     |
+        //   --g--
+        //  |     |
+        //  e     c
+        //  |     |
+        //   --d--
+        static readonly byte[] SEG = { 0x3F,0x06,0x5B,0x4F,0x66,0x6D,0x7D,0x07,0x7F,0x6F };
+
+        // Draw one seven-segment digit into a Graphics at the given x offset.
+        // dw = digit cell width, dh = digit cell height, sw = segment bar thickness.
+        static void DrawDigit(System.Drawing.Graphics g, int digit, float x, float y,
+                              float dw, float dh, float sw, System.Drawing.Brush br) {
+            if (digit < 0 || digit > 9) return;
+            byte s = SEG[digit];
+            float hw = dw;       // full width of horizontal segment
+            float vh = (dh - sw) / 2f;  // height of a vertical half
+            float midY = y + vh; // top of the middle segment
+
+            // a - top horizontal
+            if ((s & 0x01) != 0) g.FillRectangle(br, x, y, hw, sw);
+            // b - top right vertical
+            if ((s & 0x02) != 0) g.FillRectangle(br, x + hw - sw, y, sw, vh + sw);
+            // c - bottom right vertical
+            if ((s & 0x04) != 0) g.FillRectangle(br, x + hw - sw, midY, sw, vh + sw);
+            // d - bottom horizontal
+            if ((s & 0x08) != 0) g.FillRectangle(br, x, y + dh - sw, hw, sw);
+            // e - bottom left vertical
+            if ((s & 0x10) != 0) g.FillRectangle(br, x, midY, sw, vh + sw);
+            // f - top left vertical
+            if ((s & 0x20) != 0) g.FillRectangle(br, x, y, sw, vh + sw);
+            // g - middle horizontal
+            if ((s & 0x40) != 0) g.FillRectangle(br, x, midY, hw, sw);
+        }
+
+        // Digit color per app theme — chosen so the digits stay legible against the taskbar
+        // for each theme's typical brightness (dark themes -> light digits, light themes -> dark digits).
+        static System.Drawing.Color TrayDigitColor(string theme) {
+            switch (theme) {
+                case "light": return System.Drawing.Color.FromArgb(0x1B, 0x1B, 0x1F); // near-black, matches "light" theme text
+                case "japan": return System.Drawing.Color.FromArgb(0xBC, 0x00, 0x2D); // Japan theme accent red
+                case "nature": return System.Drawing.Color.FromArgb(0x34, 0xC7, 0x59); // Nature theme accent green
+                default: return System.Drawing.Color.White; // dark theme (default)
+            }
+        }
+
+        // Renders a temperature value as a tray icon using seven-segment-style digits.
+        // Digit color follows the current app theme — legible on both dark and light taskbars.
+        System.Drawing.Icon MakeTempIcon(int temp) {
+            try {
+                int sz = 32;  // standard tray icon canvas
+                var bmp = new System.Drawing.Bitmap(sz, sz, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                using (var g = System.Drawing.Graphics.FromImage(bmp)) {
+                    g.SmoothingMode = SmoothingMode.Default;
+                    g.Clear(System.Drawing.Color.Transparent);
+
+                    // Clamp to displayable range
+                    if (temp < 0) temp = 0;
+                    if (temp > 199) temp = 199;
+                    string digits = temp.ToString();
+
+                    using (var br = new System.Drawing.SolidBrush(TrayDigitColor(Settings.Theme))) {
+                        if (digits.Length == 1) {
+                            // Single digit: centered, large
+                            float dw = 18f, dh = 28f, sw = 4f;
+                            float x0 = (sz - dw) / 2f;
+                            DrawDigit(g, temp, x0, 2f, dw, dh, sw, br);
+                        } else if (digits.Length == 2) {
+                            // Two digits: fill the icon (like the reference Capture.PNG)
+                            float dw = 13f, dh = 26f, sw = 3.5f;
+                            float gap = 2f;
+                            float totalW = dw * 2 + gap;
+                            float x0 = (sz - totalW) / 2f;
+                            DrawDigit(g, digits[0] - '0', x0, 3f, dw, dh, sw, br);
+                            DrawDigit(g, digits[1] - '0', x0 + dw + gap, 3f, dw, dh, sw, br);
+                        } else {
+                            // Three digits (100+): narrower to fit
+                            float dw = 9f, dh = 24f, sw = 2.5f;
+                            float gap = 1f;
+                            float totalW = dw * 3 + gap * 2;
+                            float x0 = (sz - totalW) / 2f;
+                            for (int i = 0; i < 3; i++)
+                                DrawDigit(g, digits[i] - '0', x0 + i * (dw + gap), 4f, dw, dh, sw, br);
+                        }
+
+                        // Tiny degree symbol in the top-right corner
+                        using (var f = new System.Drawing.Font("Segoe UI", 6f, System.Drawing.FontStyle.Bold))
+                            g.DrawString("°", f, br, sz - 9f, 0f);
+                    }
+                }
+                return System.Drawing.Icon.FromHandle(bmp.GetHicon());
+            } catch { return staticIcon ?? System.Drawing.SystemIcons.Application; }
+        }
+
+        // Apply the current tray mode setting. Called on setting change and each refresh tick.
+        // 'curated' may be null (on initial apply before the first refresh); in that case
+        // temperature modes fall back to an immediate SMC read.
+        void ApplyTrayMode(Dictionary<string, double> curated) {
+            if (tray == null) return;
+            string mode = Settings.TrayMode ?? "icon";
+
+            if (mode == "icon") {
+                if (staticIcon == null) staticIcon = MakeIcon();
+                tray.Icon = staticIcon;
+                tray.Visible = true;
+            } else if (mode == "none") {
+                tray.Visible = false;
+            } else {
+                // Temperature mode: "highest" or a specific sensor key
+                double temp = double.NaN;
+                if (mode == "highest") {
+                    // Find the highest curated temperature
+                    if (curated != null) {
+                        foreach (var kv in curated)
+                            if (!double.IsNaN(kv.Value) && (double.IsNaN(temp) || kv.Value > temp))
+                                temp = kv.Value;
+                    } else {
+                        // Fallback: read sensors directly
+                        foreach (var c in CURATED) {
+                            double v = Smc.ReadTemp(c[0]);
+                            if (!double.IsNaN(v) && v >= 5 && v <= 120 && (double.IsNaN(temp) || v > temp))
+                                temp = v;
+                        }
+                    }
+                } else {
+                    // Specific sensor key
+                    if (curated != null) {
+                        double v;
+                        if (curated.TryGetValue(mode, out v)) temp = v;
+                    }
+                    if (double.IsNaN(temp)) temp = Smc.ReadTemp(mode);
+                }
+
+                if (!double.IsNaN(temp) && temp >= 0 && temp <= 200) {
+                    int display = Settings.Fahrenheit ? (int)(temp * 9.0 / 5.0 + 32.0) : (int)temp;
+                    tray.Icon = MakeTempIcon(display);
+                    tray.Visible = true;
+                } else {
+                    // Sensor unavailable — show the static icon
+                    if (staticIcon == null) staticIcon = MakeIcon();
+                    tray.Icon = staticIcon;
+                    tray.Visible = true;
+                }
+            }
         }
 
         // Aplica al abrir la última configuración guardada (si es seguro escribir)
@@ -1077,6 +1272,7 @@ namespace RPMac {
                             UpdateTemps(curated, curatedLabels);
                             if (all != null) UpdateTemps(all, allLabels);
                             UpdateOverlay(infos, curated);
+                            ApplyTrayMode(curated);
                             status.Text = "Driver OK · updated " + DateTime.Now.ToString("HH:mm:ss");
                         });
                     } catch { }
@@ -1284,6 +1480,7 @@ namespace RPMac {
         public static bool OverlayHorizontal = false;
         public static HashSet<string> OverlayItems = null; // null = mostrar todo
         public static string Theme = "dark";
+        public static string TrayMode = "icon";  // "icon", "none", "highest", or a sensor key
 
         public static void Load() {
             try {
@@ -1296,6 +1493,7 @@ namespace RPMac {
                     else if (s.Length >= 2 && s[0] == "ovorient") OverlayHorizontal = (s[1] == "h");
                     else if (s.Length >= 2 && s[0] == "ovsel") OverlayItems = new HashSet<string>(s[1].Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries));
                     else if (s.Length >= 2 && s[0] == "theme") Theme = s[1];
+                    else if (s.Length >= 2 && s[0] == "traymode") TrayMode = s[1];
                     else if (s.Length >= 4 && s[0] == "fan") {
                         int idx;
                         if (int.TryParse(s[1], out idx)) {
@@ -1330,6 +1528,7 @@ namespace RPMac {
                 lines.Add("ovorient|" + (OverlayHorizontal ? "h" : "v"));
                 if (OverlayItems != null) lines.Add("ovsel|" + string.Join(",", new List<string>(OverlayItems).ToArray()));
                 lines.Add("theme|" + Theme);
+                lines.Add("traymode|" + TrayMode);
                 foreach (var kv in Fans) lines.Add("fan|" + kv.Key + "|" + string.Join("|", kv.Value));
                 foreach (var p in Presets)
                     foreach (var kv in p.Value)
