@@ -893,12 +893,14 @@ namespace RPMac {
 
         // Digit color per app theme — chosen so the digits stay legible against the taskbar
         // for each theme's typical brightness (dark themes -> light digits, light themes -> dark digits).
+        // Digit color per app theme — reversed from the app's own text contrast per user preference:
+        // dark theme -> dark digits, light theme -> light digits.
         static System.Drawing.Color TrayDigitColor(string theme) {
             switch (theme) {
-                case "light": return System.Drawing.Color.FromArgb(0x1B, 0x1B, 0x1F); // near-black, matches "light" theme text
+                case "light": return System.Drawing.Color.White; // light theme -> white digits
                 case "japan": return System.Drawing.Color.FromArgb(0xBC, 0x00, 0x2D); // Japan theme accent red
                 case "nature": return System.Drawing.Color.FromArgb(0x34, 0xC7, 0x59); // Nature theme accent green
-                default: return System.Drawing.Color.White; // dark theme (default)
+                default: return System.Drawing.Color.FromArgb(0x1B, 0x1B, 0x1F); // dark theme -> near-black digits
             }
         }
 
