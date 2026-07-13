@@ -119,7 +119,7 @@ namespace RPMac {
     </Setter.Value></Setter>
   </Style>
   <Style TargetType=""ComboBox"">
-    <Setter Property=""Foreground"" Value=""#EDEDED""/>
+    <Setter Property=""Foreground"" Value=""{DynamicResource ThemeText}""/>
     <Setter Property=""Height"" Value=""30""/>
     <Setter Property=""Template""><Setter.Value>
       <ControlTemplate TargetType=""ComboBox"">
@@ -128,9 +128,9 @@ namespace RPMac {
               IsChecked=""{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"">
             <ToggleButton.Template>
               <ControlTemplate TargetType=""ToggleButton"">
-                <Border Background=""#2A2A32"" BorderBrush=""#3A3A42"" BorderThickness=""1"" CornerRadius=""8"">
+                <Border Background=""{DynamicResource ThemeControlBg}"" BorderBrush=""{DynamicResource ThemeBorder}"" BorderThickness=""1"" CornerRadius=""8"">
                   <Path HorizontalAlignment=""Right"" VerticalAlignment=""Center"" Margin=""0,0,12,0""
-                        Data=""M 0 0 L 8 0 L 4 5 Z"" Fill=""#EDEDED""/>
+                        Data=""M 0 0 L 8 0 L 4 5 Z"" Fill=""{DynamicResource ThemeText}""/>
                 </Border>
               </ControlTemplate>
             </ToggleButton.Template>
@@ -140,7 +140,7 @@ namespace RPMac {
               Margin=""12,0,28,0"" VerticalAlignment=""Center"" HorizontalAlignment=""Left""/>
           <Popup Name=""Popup"" Placement=""Bottom"" IsOpen=""{TemplateBinding IsDropDownOpen}""
                  AllowsTransparency=""True"" Focusable=""False"" PopupAnimation=""Slide"">
-            <Border Background=""#2A2A32"" BorderBrush=""#3A3A42"" BorderThickness=""1"" CornerRadius=""8""
+            <Border Background=""{DynamicResource ThemeControlBg}"" BorderBrush=""{DynamicResource ThemeBorder}"" BorderThickness=""1"" CornerRadius=""8""
                     MinWidth=""{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}"" MaxHeight=""220"" Margin=""0,3,0,0"">
               <ScrollViewer><StackPanel IsItemsHost=""True""/></ScrollViewer>
             </Border>
@@ -150,23 +150,23 @@ namespace RPMac {
     </Setter.Value></Setter>
   </Style>
   <Style TargetType=""ComboBoxItem"">
-    <Setter Property=""Foreground"" Value=""#EDEDED""/>
+    <Setter Property=""Foreground"" Value=""{DynamicResource ThemeText}""/>
     <Setter Property=""Template""><Setter.Value>
       <ControlTemplate TargetType=""ComboBoxItem"">
         <Border Name=""Bd"" Background=""Transparent"" Padding=""12,8,12,8"" CornerRadius=""6"">
           <ContentPresenter/>
         </Border>
         <ControlTemplate.Triggers>
-          <Trigger Property=""IsHighlighted"" Value=""True""><Setter TargetName=""Bd"" Property=""Background"" Value=""#0A84FF""/></Trigger>
+          <Trigger Property=""IsHighlighted"" Value=""True""><Setter TargetName=""Bd"" Property=""Background"" Value=""{DynamicResource ThemeAccent}""/></Trigger>
         </ControlTemplate.Triggers>
       </ControlTemplate>
     </Setter.Value></Setter>
   </Style>
   <Style TargetType=""TextBox"">
-    <Setter Property=""Foreground"" Value=""#EDEDED""/>
-    <Setter Property=""CaretBrush"" Value=""#EDEDED""/>
-    <Setter Property=""Background"" Value=""#2A2A32""/>
-    <Setter Property=""BorderBrush"" Value=""#3A3A42""/>
+    <Setter Property=""Foreground"" Value=""{DynamicResource ThemeText}""/>
+    <Setter Property=""CaretBrush"" Value=""{DynamicResource ThemeText}""/>
+    <Setter Property=""Background"" Value=""{DynamicResource ThemeControlBg}""/>
+    <Setter Property=""BorderBrush"" Value=""{DynamicResource ThemeBorder}""/>
     <Setter Property=""BorderThickness"" Value=""1""/>
     <Setter Property=""Padding"" Value=""9,7,9,7""/>
     <Setter Property=""VerticalContentAlignment"" Value=""Center""/>
