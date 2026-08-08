@@ -44,7 +44,7 @@ echo Compiling smccore (command-line / scripting tool)...
 
 if errorlevel 1 (
   echo.
-  echo BUILD FAILED (smccore)
+  echo BUILD FAILED ^(smccore^)
   exit /b 1
 )
 

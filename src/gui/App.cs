@@ -238,10 +238,19 @@ namespace RPMac {
         const double BAR_W = 404;
         ComboBox trayModeCombo;     // "Show in tray" dropdown
         System.Drawing.Icon staticIcon;  // cached default "R" icon
+        IntPtr staticIconHandle = IntPtr.Zero;
+        // Icon currently shown in temperature mode, plus the HICON behind it. Icon.FromHandle
+        // does NOT take ownership of the handle (not even Dispose frees it), so we destroy it
+        // ourselves once the tray no longer needs it — see SetTrayTempIcon.
+        System.Drawing.Icon tempIcon;
+        IntPtr tempIconHandle = IntPtr.Zero;
+        int tempIconValue = int.MinValue;   // value the current icon was drawn for
+        string tempIconTheme;               // theme the current icon was drawn with
         System.Windows.Forms.NotifyIcon tray;
         bool quitting = false;
 
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int val, int size);
+        [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr h);
 
         public MainWindow() {
             Title = "RPMac";
@@ -791,7 +800,12 @@ namespace RPMac {
         void UpdateTrayPresets() {
             if (trayPresetsItem == null) return;
             try {
+                // Clear() only detaches; dispose the old items so rebuilding the submenu
+                // doesn't pile up abandoned ToolStrip items.
+                var old = new List<System.Windows.Forms.ToolStripItem>();
+                foreach (System.Windows.Forms.ToolStripItem it in trayPresetsItem.DropDownItems) old.Add(it);
                 trayPresetsItem.DropDownItems.Clear();
+                foreach (var it in old) { try { it.Dispose(); } catch { } }
                 if (Settings.Presets.Count == 0) {
                     var none = new System.Windows.Forms.ToolStripMenuItem("(no presets yet)") { Enabled = false };
                     trayPresetsItem.DropDownItems.Add(none);
@@ -826,29 +840,39 @@ namespace RPMac {
         }
         void QuitApp() {
             quitting = true;
-            try { if (tray != null) tray.Visible = false; } catch { }
+            try { if (tray != null) { tray.Visible = false; tray.Dispose(); tray = null; } } catch { }
+            // Free the icon handles we own (the tray no longer references them).
+            ReleaseIcon(tempIcon, tempIconHandle);
+            tempIcon = null; tempIconHandle = IntPtr.Zero;
+            ReleaseIcon(staticIcon, staticIconHandle);
+            staticIcon = null; staticIconHandle = IntPtr.Zero;
             running = false;
             Smc.Cleanup();
             System.Windows.Application.Current.Shutdown();
         }
         System.Drawing.Icon MakeIcon() {
             try {
-                var bmp = new System.Drawing.Bitmap(32, 32);
-                using (var g = System.Drawing.Graphics.FromImage(bmp)) {
-                    g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                    g.Clear(System.Drawing.Color.Transparent);
-                    using (var br = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(10, 132, 255)))
-                        g.FillEllipse(br, 1, 1, 30, 30);
-                    using (var f = new System.Drawing.Font("Segoe UI", 13, System.Drawing.FontStyle.Bold))
-                    using (var wb = new System.Drawing.SolidBrush(System.Drawing.Color.White)) {
-                        var sf = new System.Drawing.StringFormat {
-                            Alignment = System.Drawing.StringAlignment.Center,
-                            LineAlignment = System.Drawing.StringAlignment.Center
-                        };
-                        g.DrawString("R", f, wb, new System.Drawing.RectangleF(0, 0, 32, 32), sf);
+                using (var bmp = new System.Drawing.Bitmap(32, 32)) {
+                    using (var g = System.Drawing.Graphics.FromImage(bmp)) {
+                        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                        g.Clear(System.Drawing.Color.Transparent);
+                        using (var br = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(10, 132, 255)))
+                            g.FillEllipse(br, 1, 1, 30, 30);
+                        using (var f = new System.Drawing.Font("Segoe UI", 13, System.Drawing.FontStyle.Bold))
+                        using (var wb = new System.Drawing.SolidBrush(System.Drawing.Color.White)) {
+                            var sf = new System.Drawing.StringFormat {
+                                Alignment = System.Drawing.StringAlignment.Center,
+                                LineAlignment = System.Drawing.StringAlignment.Center
+                            };
+                            g.DrawString("R", f, wb, new System.Drawing.RectangleF(0, 0, 32, 32), sf);
+                        }
                     }
+                    IntPtr h = bmp.GetHicon();
+                    if (h == IntPtr.Zero) return System.Drawing.SystemIcons.Application;
+                    // Built once and kept for the life of the app; the handle is destroyed on quit.
+                    staticIconHandle = h;
+                    return System.Drawing.Icon.FromHandle(h);
                 }
-                return System.Drawing.Icon.FromHandle(bmp.GetHicon());
             } catch { return System.Drawing.SystemIcons.Application; }
         }
 
@@ -906,50 +930,97 @@ namespace RPMac {
 
         // Renders a temperature value as a tray icon using seven-segment-style digits.
         // Digit color follows the current app theme — legible on both dark and light taskbars.
-        System.Drawing.Icon MakeTempIcon(int temp) {
+        // Returns null on failure. 'handle' receives the HICON, which the CALLER owns and must
+        // DestroyIcon once the tray is done with it (Icon.FromHandle never frees it).
+        System.Drawing.Icon MakeTempIcon(int temp, out IntPtr handle) {
+            handle = IntPtr.Zero;
             try {
                 int sz = 32;  // standard tray icon canvas
-                var bmp = new System.Drawing.Bitmap(sz, sz, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
-                using (var g = System.Drawing.Graphics.FromImage(bmp)) {
-                    g.SmoothingMode = SmoothingMode.Default;
-                    g.Clear(System.Drawing.Color.Transparent);
+                using (var bmp = new System.Drawing.Bitmap(sz, sz, System.Drawing.Imaging.PixelFormat.Format32bppArgb)) {
+                    using (var g = System.Drawing.Graphics.FromImage(bmp)) {
+                        g.SmoothingMode = SmoothingMode.Default;
+                        g.Clear(System.Drawing.Color.Transparent);
 
-                    // Clamp to displayable range
-                    if (temp < 0) temp = 0;
-                    if (temp > 199) temp = 199;
-                    string digits = temp.ToString();
+                        // Clamp to displayable range
+                        if (temp < 0) temp = 0;
+                        if (temp > 199) temp = 199;
+                        string digits = temp.ToString();
 
-                    using (var br = new System.Drawing.SolidBrush(TrayDigitColor(Settings.Theme))) {
-                        if (digits.Length == 1) {
-                            // Single digit: centered, large
-                            float dw = 18f, dh = 28f, sw = 4f;
-                            float x0 = (sz - dw) / 2f;
-                            DrawDigit(g, temp, x0, 2f, dw, dh, sw, br);
-                        } else if (digits.Length == 2) {
-                            // Two digits: fill the icon (like the reference Capture.PNG)
-                            float dw = 13f, dh = 26f, sw = 3.5f;
-                            float gap = 2f;
-                            float totalW = dw * 2 + gap;
-                            float x0 = (sz - totalW) / 2f;
-                            DrawDigit(g, digits[0] - '0', x0, 3f, dw, dh, sw, br);
-                            DrawDigit(g, digits[1] - '0', x0 + dw + gap, 3f, dw, dh, sw, br);
-                        } else {
-                            // Three digits (100+): narrower to fit
-                            float dw = 9f, dh = 24f, sw = 2.5f;
-                            float gap = 1f;
-                            float totalW = dw * 3 + gap * 2;
-                            float x0 = (sz - totalW) / 2f;
-                            for (int i = 0; i < 3; i++)
-                                DrawDigit(g, digits[i] - '0', x0 + i * (dw + gap), 4f, dw, dh, sw, br);
+                        using (var br = new System.Drawing.SolidBrush(TrayDigitColor(Settings.Theme))) {
+                            if (digits.Length == 1) {
+                                // Single digit: centered, large
+                                float dw = 18f, dh = 28f, sw = 4f;
+                                float x0 = (sz - dw) / 2f;
+                                DrawDigit(g, temp, x0, 2f, dw, dh, sw, br);
+                            } else if (digits.Length == 2) {
+                                // Two digits: fill the icon (like the reference Capture.PNG)
+                                float dw = 13f, dh = 26f, sw = 3.5f;
+                                float gap = 2f;
+                                float totalW = dw * 2 + gap;
+                                float x0 = (sz - totalW) / 2f;
+                                DrawDigit(g, digits[0] - '0', x0, 3f, dw, dh, sw, br);
+                                DrawDigit(g, digits[1] - '0', x0 + dw + gap, 3f, dw, dh, sw, br);
+                            } else {
+                                // Three digits (100+): narrower to fit
+                                float dw = 9f, dh = 24f, sw = 2.5f;
+                                float gap = 1f;
+                                float totalW = dw * 3 + gap * 2;
+                                float x0 = (sz - totalW) / 2f;
+                                for (int i = 0; i < 3; i++)
+                                    DrawDigit(g, digits[i] - '0', x0 + i * (dw + gap), 4f, dw, dh, sw, br);
+                            }
+
+                            // Tiny degree symbol in the top-right corner
+                            using (var f = new System.Drawing.Font("Segoe UI", 6f, System.Drawing.FontStyle.Bold))
+                                g.DrawString("°", f, br, sz - 9f, 0f);
                         }
-
-                        // Tiny degree symbol in the top-right corner
-                        using (var f = new System.Drawing.Font("Segoe UI", 6f, System.Drawing.FontStyle.Bold))
-                            g.DrawString("°", f, br, sz - 9f, 0f);
                     }
+                    IntPtr h = bmp.GetHicon();
+                    if (h == IntPtr.Zero) return null;
+                    handle = h;
+                    return System.Drawing.Icon.FromHandle(h);
                 }
-                return System.Drawing.Icon.FromHandle(bmp.GetHicon());
-            } catch { return staticIcon ?? System.Drawing.SystemIcons.Application; }
+            } catch { return null; }
+        }
+
+        // Show 'display' on the tray icon, redrawing only when the value (or theme) actually
+        // changed, and freeing the previous icon's HICON afterwards. Without the DestroyIcon
+        // every refresh tick leaked a USER/GDI handle: at one icon every 2 s the process hit
+        // the 10.000-handle quota after a few hours, at which point GetHicon started failing
+        // (tray fell back to the "R" icon) and the UI could no longer create windows.
+        void SetTrayTempIcon(int display) {
+            if (tempIcon != null && display == tempIconValue && Settings.Theme == tempIconTheme) {
+                if (!ReferenceEquals(tray.Icon, tempIcon)) tray.Icon = tempIcon;
+                tray.Visible = true;
+                return;
+            }
+            IntPtr h;
+            var icon = MakeTempIcon(display, out h);
+            if (icon == null) { ShowStaticIcon(); return; }
+
+            var oldIcon = tempIcon; IntPtr oldHandle = tempIconHandle;
+            tempIcon = icon; tempIconHandle = h;
+            tempIconValue = display; tempIconTheme = Settings.Theme;
+            tray.Icon = icon;          // hand the new icon to the shell first…
+            tray.Visible = true;
+            ReleaseIcon(oldIcon, oldHandle);   // …then release the one it no longer uses
+        }
+
+        // Drop a generated icon and the HICON behind it. A null handle means the icon is a
+        // shared system one (the MakeIcon fallback), which we must not touch.
+        static void ReleaseIcon(System.Drawing.Icon icon, IntPtr handle) {
+            if (handle == IntPtr.Zero) return;
+            if (icon != null) { try { icon.Dispose(); } catch { } }
+            try { DestroyIcon(handle); } catch { }
+        }
+
+        // Switch the tray back to the static "R" icon, releasing any temperature icon.
+        void ShowStaticIcon() {
+            if (staticIcon == null) staticIcon = MakeIcon();
+            tray.Icon = staticIcon;
+            tray.Visible = true;
+            ReleaseIcon(tempIcon, tempIconHandle);
+            tempIcon = null; tempIconHandle = IntPtr.Zero; tempIconValue = int.MinValue;
         }
 
         // Apply the current tray mode setting. Called on setting change and each refresh tick.
@@ -960,11 +1031,11 @@ namespace RPMac {
             string mode = Settings.TrayMode ?? "icon";
 
             if (mode == "icon") {
-                if (staticIcon == null) staticIcon = MakeIcon();
-                tray.Icon = staticIcon;
-                tray.Visible = true;
+                ShowStaticIcon();
             } else if (mode == "none") {
                 tray.Visible = false;
+                ReleaseIcon(tempIcon, tempIconHandle);
+                tempIcon = null; tempIconHandle = IntPtr.Zero; tempIconValue = int.MinValue;
             } else {
                 // Temperature mode: "highest" or a specific sensor key
                 double temp = double.NaN;
@@ -993,13 +1064,10 @@ namespace RPMac {
 
                 if (!double.IsNaN(temp) && temp >= 0 && temp <= 200) {
                     int display = Settings.Fahrenheit ? (int)(temp * 9.0 / 5.0 + 32.0) : (int)temp;
-                    tray.Icon = MakeTempIcon(display);
-                    tray.Visible = true;
+                    SetTrayTempIcon(display);
                 } else {
                     // Sensor unavailable — show the static icon
-                    if (staticIcon == null) staticIcon = MakeIcon();
-                    tray.Icon = staticIcon;
-                    tray.Visible = true;
+                    ShowStaticIcon();
                 }
             }
         }
@@ -1377,8 +1445,15 @@ namespace RPMac {
         List<string[]> lastRows = new List<string[]>();
         readonly Border card;
 
+        // One frozen effect shared by every label: Render() rebuilds the whole panel each
+        // refresh, so allocating a fresh (unfreezable) effect per TextBlock churned render
+        // resources every 2 s for no reason.
+        static readonly DropShadowEffect TEXT_SHADOW = Shadow();
+
         static DropShadowEffect Shadow() {
-            return new DropShadowEffect { Color = Colors.Black, BlurRadius = 4, ShadowDepth = 0, Opacity = 0.55 };
+            var e = new DropShadowEffect { Color = Colors.Black, BlurRadius = 4, ShadowDepth = 0, Opacity = 0.55 };
+            e.Freeze();
+            return e;
         }
 
         public Overlay() {
@@ -1425,8 +1500,8 @@ namespace RPMac {
             Top = wa.Top + 2;
         }
 
-        TextBlock Label(string t, double size) { return new TextBlock { Text = t, Foreground = MainWindow.SUB, FontSize = size, Effect = Shadow(), VerticalAlignment = VerticalAlignment.Center }; }
-        TextBlock Value(string t, double size) { return new TextBlock { Text = t, Foreground = MainWindow.TXT, FontSize = size, FontWeight = FontWeights.SemiBold, Effect = Shadow(), VerticalAlignment = VerticalAlignment.Center }; }
+        TextBlock Label(string t, double size) { return new TextBlock { Text = t, Foreground = MainWindow.SUB, FontSize = size, Effect = TEXT_SHADOW, VerticalAlignment = VerticalAlignment.Center }; }
+        TextBlock Value(string t, double size) { return new TextBlock { Text = t, Foreground = MainWindow.TXT, FontSize = size, FontWeight = FontWeights.SemiBold, Effect = TEXT_SHADOW, VerticalAlignment = VerticalAlignment.Center }; }
 
         // rows: cada item es { etiqueta, valor }
         public void Update(List<string[]> rows) { lastRows = rows; Render(rows); BringTopmost(); }
@@ -1445,7 +1520,7 @@ namespace RPMac {
             // cabecera: punto de acento (+ "RPMac" solo en vertical, para no ocupar de mas)
             var head = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = Horizontal ? new Thickness(0, 0, 12, 0) : new Thickness(0, 0, 0, 6) };
             head.Children.Add(new Border { Width = dotSize, Height = dotSize, CornerRadius = new CornerRadius(dotSize / 2), Background = MainWindow.ACCENT, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, Horizontal ? 0.0 : 7.0, 0) });
-            if (!Horizontal) head.Children.Add(new TextBlock { Text = "RPMac", Foreground = MainWindow.TXT, FontSize = 12, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center, Effect = Shadow() });
+            if (!Horizontal) head.Children.Add(new TextBlock { Text = "RPMac", Foreground = MainWindow.TXT, FontSize = 12, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center, Effect = TEXT_SHADOW });
             panel.Children.Add(head);
 
             foreach (var r in rows) {
