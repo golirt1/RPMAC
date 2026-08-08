@@ -1,3 +1,18 @@
+## RPMac v1.4.0
+
+**The other app capable of controlling fans on Intel Macs in Windows — for free.**
+
+### What's new in 1.4.0
+- **Temperature in the system tray.** The tray icon can now show a live temperature — the highest sensor, or a specific one — as seven-segment digits, instead of (or as well as) the app icon. Pick it in **Settings → "Show in tray"** (App Icon / None / Highest Temp / a specific sensor). Contributed by VladislavEkimtcov.
+- **Fixed: RPMac now launches at startup on battery.** The "Start with Windows" task was created with Windows' default *"start only if on AC power"* condition, so on laptops it wouldn't launch at logon while on battery. The task now allows running on battery. Reported by hooshmandd700.
+- **Fixed a tray-icon handle leak** that could make the app run out of Windows handles and crash after a few hours in temperature-tray mode. Contributed by VladislavEkimtcov.
+
+### Download
+Download `RPMac-v1.4.0-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
+Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` together in the same folder.
+
+---
+
 ## RPMac v1.3.2
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**
