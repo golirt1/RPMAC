@@ -1637,7 +1637,35 @@ namespace RPMac {
             return p.ExitCode;
         }
         public static bool IsEnabled() { return Run("/query /tn " + TASK) == 0; }
-        public static void Enable(string exe) { Run("/create /tn " + TASK + " /tr \"\\\"" + exe + "\\\"\" /sc onlogon /rl highest /f"); }
+        public static void Enable(string exe) {
+            // `schtasks /create` defaults the task to "start only if on AC power" and "stop if
+            // going on battery", so on a laptop RPMac won't launch at logon while on battery.
+            // Register via an XML definition instead, where we can turn both conditions off.
+            try {
+                string xml =
+                    "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n" +
+                    "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">\r\n" +
+                    "  <RegistrationInfo><Description>RPMac fan control</Description></RegistrationInfo>\r\n" +
+                    "  <Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers>\r\n" +
+                    "  <Principals><Principal id=\"Author\"><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>\r\n" +
+                    "  <Settings>\r\n" +
+                    "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\r\n" +
+                    "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\r\n" +
+                    "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\r\n" +
+                    "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\r\n" +
+                    "    <Enabled>true</Enabled>\r\n" +
+                    "  </Settings>\r\n" +
+                    "  <Actions Context=\"Author\"><Exec><Command>" + System.Security.SecurityElement.Escape(exe) + "</Command></Exec></Actions>\r\n" +
+                    "</Task>";
+                string tmp = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "RPMac_task.xml");
+                System.IO.File.WriteAllText(tmp, xml, System.Text.Encoding.Unicode); // schtasks expects UTF-16
+                int r = Run("/create /tn " + TASK + " /xml \"" + tmp + "\" /f");
+                try { System.IO.File.Delete(tmp); } catch { }
+                if (r == 0) return;
+            } catch { }
+            // Fallback to the simple form if XML registration failed for any reason.
+            Run("/create /tn " + TASK + " /tr \"\\\"" + exe + "\\\"\" /sc onlogon /rl highest /f");
+        }
         public static void Disable() { Run("/delete /tn " + TASK + " /f"); }
     }
 
