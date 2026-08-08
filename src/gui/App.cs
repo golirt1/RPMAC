@@ -782,7 +782,10 @@ namespace RPMac {
         void SetupTray() {
             try {
                 tray = new System.Windows.Forms.NotifyIcon();
-                tray.Icon = MakeIcon();
+                // Cache it: MakeIcon records its HICON in staticIconHandle, so building a
+                // second one here would orphan the first handle.
+                if (staticIcon == null) staticIcon = MakeIcon();
+                tray.Icon = staticIcon;
                 tray.Text = "RPMac";
                 tray.Visible = true;
                 tray.DoubleClick += delegate { ShowFromTray(); };
