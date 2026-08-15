@@ -39,7 +39,7 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 ## Features
 - Real-time fan RPM and temperature monitoring
 - Per-fan control: Auto / Max / custom RPM / **temperature curve**
-- **Per-fan temperature curve** — pick a sensor and ramp RPM between a min and max temperature
+- **Per-fan temperature curve** — ramp RPM between a min and max temperature, driven either by a sensor you pick or by the **hottest sensor** ("Highest temp"), so the fan reacts to whichever of CPU/GPU is hottest
 - **Presets** — save your fan setup as named profiles (e.g. Silent, Gaming) and switch with one click, from the app or the tray icon
 - Command-line tool (`smccore.exe`) for scripting fan control
 - Curated, friendly temperature sensors (plus a raw view of every key)
@@ -56,7 +56,7 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 ## Install
 No installer needed — it's a portable app.
 
-1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.4.0-windows.zip` (under **Assets**).
+1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.4.1-windows.zip` (under **Assets**).
 2. **Unzip it** to any folder you like (e.g. your Desktop). Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` **together in the same folder**.
 3. **Right-click `RPMac.exe` → "Run as administrator"** (administrator rights are required to access the Mac's hardware/SMC).
 4. Set each fan to **Auto / Max / a custom RPM**. Temperatures update live.
@@ -68,21 +68,24 @@ To **uninstall**, just delete the folder. Settings live in `%APPDATA%\RPMac`; if
 ## Compatibility
 | Hardware | Status |
 |---|---|
-| Intel Macs (up to 2017) on Boot Camp | Should work (tested on MacPro6,1 and MacPro3,1) |
+| Intel Macs (up to 2017) on Boot Camp | Should work (confirmed on MacPro6,1, MacPro3,1 and iMac17,1) |
 | Intel Macs with T2 (2018-2020) | **Not working yet** — the T2 uses a different SMC interface; support is in progress |
 | Apple Silicon (M1+) | Not possible (no Boot Camp) |
 | Non-Apple PCs | Read-only (writes are blocked) |
 
 ### Tested hardware
-RPMac has been verified on **two machines**:
+RPMac has been verified on **three machines**:
 
 - **Mac Pro (Late 2013)** — model identifier `MacPro6,1`
   - Intel Xeon CPU, dual AMD FirePro GPUs, single centrifugal system fan
   - SMC fan/sensor values in `fpe2` format, I/O base `0x300`
 - **Mac Pro (2008)** — model identifier `MacPro3,1`
   - Older Boot Camp in BIOS/CSM mode (where the Windows BIOS strings can be empty or lack "Apple") — RPMac still detects it via the SMC itself
+- **iMac (Retina 5K, 27-inch, Late 2015)** — model identifier `iMac17,1`
+  - Intel Core i5-6500, AMD Radeon R9 M380, Windows 10 (Boot Camp)
+  - Fan control (Auto / Max / Manual / Curve) and temperature sensors both work; reported by a user (thanks @Bibihi98)
 
-On both machines, reading sensors and controlling the fans (Auto / Max / custom RPM) work correctly.
+On all three machines, reading sensors and controlling the fans (Auto / Max / custom RPM) work correctly.
 
 ### Other Intel Macs (untested, but expected to work)
 Beyond the two Mac Pros above, RPMac has **not** been tested on other Mac models yet. That said, it is built on the **standard Apple SMC interface that is common to virtually all Intel Macs**, and the core auto-detects the number of fans and each key's data format. So it *should* work on most Intel Macs in Boot Camp, with these caveats:

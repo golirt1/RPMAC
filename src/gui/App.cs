@@ -57,7 +57,23 @@ namespace RPMac {
             }
             SetC(BG, p[0]); SetC(CARD, p[1]); SetC(TXT, p[2]); SetC(SUB, p[3]);
             SetC(ACCENT, p[4]); SetC(RED, p[5]); SetC(CHIP, p[6]); SetC(BORDER, p[7]); SetC(BAR, p[8]); SetC(OVBG, p[9]);
+            // The style templates (ComboBox/TextBox/Slider/ScrollBar) read theme colors through
+            // DynamicResource. WPF FREEZES a brush once it's referenced by a sealed style, so those
+            // resource brushes can't be mutated like the ones above — instead we swap in fresh brushes
+            // here, which makes every DynamicResource re-resolve to the new color. (The brushes above
+            // stay mutable precisely because they are NOT registered as resources.)
+            SetThemeResources();
             SetTitleBar(IsDark(name));
+        }
+
+        // Swap the DynamicResource theme brushes for fresh instances matching the current palette.
+        // Must be new objects each call: a brush used by a sealed style gets frozen and can't change.
+        void SetThemeResources() {
+            Resources["ThemeText"]      = new SolidColorBrush(TXT.Color);
+            Resources["ThemeControlBg"] = new SolidColorBrush(CHIP.Color);
+            Resources["ThemeBorder"]    = new SolidColorBrush(BORDER.Color);
+            Resources["ThemeAccent"]    = new SolidColorBrush(ACCENT.Color);
+            Resources["ThemeSub"]       = new SolidColorBrush(SUB.Color);
         }
 
         // Sensor labels verified against VirtualSMC iStat.txt, KnownSMCKeys and applesmc.c.
@@ -108,11 +124,11 @@ namespace RPMac {
     <Setter Property=""Template""><Setter.Value>
       <ControlTemplate TargetType=""Slider"">
         <Grid Height=""22"" VerticalAlignment=""Center"">
-          <Border Height=""5"" CornerRadius=""2.5"" Background=""#3A3A42"" VerticalAlignment=""Center""/>
+          <Border Height=""5"" CornerRadius=""2.5"" Background=""{DynamicResource ThemeControlBg}"" VerticalAlignment=""Center""/>
           <Track x:Name=""PART_Track"">
-            <Track.DecreaseRepeatButton><RepeatButton Focusable=""False"" OverridesDefaultStyle=""True""><RepeatButton.Template><ControlTemplate TargetType=""RepeatButton""><Border Height=""5"" CornerRadius=""2.5"" Background=""#0A84FF"" VerticalAlignment=""Center""/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.DecreaseRepeatButton>
+            <Track.DecreaseRepeatButton><RepeatButton Focusable=""False"" OverridesDefaultStyle=""True""><RepeatButton.Template><ControlTemplate TargetType=""RepeatButton""><Border Height=""5"" CornerRadius=""2.5"" Background=""{DynamicResource ThemeAccent}"" VerticalAlignment=""Center""/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.DecreaseRepeatButton>
             <Track.IncreaseRepeatButton><RepeatButton Focusable=""False"" OverridesDefaultStyle=""True""><RepeatButton.Template><ControlTemplate TargetType=""RepeatButton""><Border Background=""Transparent""/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.IncreaseRepeatButton>
-            <Track.Thumb><Thumb OverridesDefaultStyle=""True""><Thumb.Template><ControlTemplate TargetType=""Thumb""><Ellipse Width=""16"" Height=""16"" Fill=""White""/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+            <Track.Thumb><Thumb OverridesDefaultStyle=""True""><Thumb.Template><ControlTemplate TargetType=""Thumb""><Ellipse Width=""16"" Height=""16"" Fill=""{DynamicResource ThemeText}""/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
           </Track>
         </Grid>
       </ControlTemplate>
@@ -188,7 +204,7 @@ namespace RPMac {
           <Track x:Name=""PART_Track"" IsDirectionReversed=""True"" Minimum=""{TemplateBinding Minimum}"" Maximum=""{TemplateBinding Maximum}"" Value=""{TemplateBinding Value}"" ViewportSize=""{TemplateBinding ViewportSize}"">
             <Track.DecreaseRepeatButton><RepeatButton Focusable=""False"" OverridesDefaultStyle=""True"" Command=""ScrollBar.PageUpCommand""><RepeatButton.Template><ControlTemplate TargetType=""RepeatButton""><Border Background=""Transparent""/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.DecreaseRepeatButton>
             <Track.IncreaseRepeatButton><RepeatButton Focusable=""False"" OverridesDefaultStyle=""True"" Command=""ScrollBar.PageDownCommand""><RepeatButton.Template><ControlTemplate TargetType=""RepeatButton""><Border Background=""Transparent""/></ControlTemplate></RepeatButton.Template></RepeatButton></Track.IncreaseRepeatButton>
-            <Track.Thumb><Thumb OverridesDefaultStyle=""True"" MinHeight=""34""><Thumb.Template><ControlTemplate TargetType=""Thumb""><Border CornerRadius=""5"" Background=""#5AFFFFFF"" Margin=""2,0,2,0""/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+            <Track.Thumb><Thumb OverridesDefaultStyle=""True"" MinHeight=""34""><Thumb.Template><ControlTemplate TargetType=""Thumb""><Border CornerRadius=""5"" Background=""{DynamicResource ThemeSub}"" Margin=""2,0,2,0""/></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
           </Track>
         </Grid>
       </ControlTemplate>
@@ -260,15 +276,14 @@ namespace RPMac {
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
             TextOptions.SetTextFormattingMode(this, TextFormattingMode.Ideal);
 
-            // Named brush resources so the STYLES XAML (ComboBox/TextBox templates) can use
-            // DynamicResource and follow the live theme instead of hardcoded dark-theme hex colors.
-            Resources["ThemeText"] = TXT;
-            Resources["ThemeControlBg"] = CHIP;
-            Resources["ThemeBorder"] = BORDER;
-            Resources["ThemeAccent"] = ACCENT;
+            // The STYLES XAML (ComboBox/TextBox/Slider/ScrollBar templates) pull their colors from
+            // named theme resources via DynamicResource. Those resource brushes are set (and re-set on
+            // every theme change) by ApplyTheme -> SetThemeResources with FRESH instances, because a
+            // brush referenced by a sealed style gets frozen and could never change afterwards. They are
+            // deliberately kept separate from the mutable BG/CARD/TXT/... brushes used directly in code.
             try { Resources.MergedDictionaries.Add((ResourceDictionary)XamlReader.Parse(STYLES)); } catch { }
             Settings.Load();
-            ApplyTheme(Settings.Theme); // colorea la paleta antes de construir la UI
+            ApplyTheme(Settings.Theme); // colorea la paleta (y crea los recursos de tema) antes de construir la UI
 
             // barra de titulo acorde al tema
             SourceInitialized += delegate {
@@ -357,12 +372,21 @@ namespace RPMac {
             return false;
         }
 
+        // Highlight a mode chip: colored background + white label when active, so the text
+        // stays readable on the accent/red fill in the light themes too (not just dark).
+        static void SetChipActive(Border chip, bool active, Brush activeBg) {
+            if (chip == null) return;
+            chip.Background = active ? activeBg : CHIP;
+            var tb = chip.Child as TextBlock;
+            if (tb != null) tb.Foreground = active ? Brushes.White : TXT;
+        }
+
         void SetMode(FanUi f, string mode) {
             f.CurMode = mode;
-            f.Auto.Background = (mode == "auto") ? ACCENT : CHIP;
-            f.MaxBtn.Background = (mode == "max") ? RED : CHIP;
-            f.Manual.Background = (mode == "manual") ? ACCENT : CHIP;
-            if (f.CurveBtn != null) f.CurveBtn.Background = (mode == "curve") ? ACCENT : CHIP;
+            SetChipActive(f.Auto, mode == "auto", ACCENT);
+            SetChipActive(f.MaxBtn, mode == "max", RED);
+            SetChipActive(f.Manual, mode == "manual", ACCENT);
+            SetChipActive(f.CurveBtn, mode == "curve", ACCENT);
             bool man = (mode == "manual");
             bool cur = (mode == "curve");
             f.Slider.IsEnabled = man;
@@ -383,6 +407,21 @@ namespace RPMac {
             if (temp <= tMin) return rMin;
             if (temp >= tMax) return rMax;
             return rMin + (rMax - rMin) * (temp - tMin) / (tMax - tMin);
+        }
+
+        // Special curve "sensor" that tracks the hottest curated temperature instead of a
+        // single fixed sensor, so a fan ramps up when ANY sensor gets hot (e.g. CPU or GPU).
+        const string HIGHEST_SENSOR = "__highest__";
+
+        // Highest valid temperature among the curated sensors (NaN if none). Reused by the
+        // curve loop; same rule as the tray "Highest Temp" mode.
+        static double HighestCurated(Dictionary<string, double> curated) {
+            double temp = double.NaN;
+            if (curated != null)
+                foreach (var kv in curated)
+                    if (!double.IsNaN(kv.Value) && (double.IsNaN(temp) || kv.Value > temp))
+                        temp = kv.Value;
+            return temp;
         }
 
         // One labeled slider row used by the curve editor. Live-updates its value label.
@@ -416,7 +455,7 @@ namespace RPMac {
             Settings.SetFanCurve(f.Index, key, tmin, tmax, rmin, rmax);
             ClearActivePreset();
             status.Text = string.Format("Fan {0}: curve on · {1} {2:0}–{3:0}°C → {4:0}–{5:0} RPM",
-                f.Index, key, tmin, tmax, rmin, rmax);
+                f.Index, (key == HIGHEST_SENSOR ? "highest temp" : key), tmin, tmax, rmin, rmax);
         }
 
         void BuildFans(Panel parent) {
@@ -484,6 +523,9 @@ namespace RPMac {
                     var sensRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 2) };
                     sensRow.Children.Add(new TextBlock { Text = "Sensor", Foreground = SUB, Width = 70, VerticalAlignment = VerticalAlignment.Center, FontSize = 12 });
                     f.CurveSensor = new ComboBox { Width = 200, VerticalAlignment = VerticalAlignment.Center };
+                    // "Highest temp" (max of all sensors) first, so a fan can react to whichever
+                    // sensor is hottest — useful on iMacs where CPU or GPU can each spike.
+                    f.CurveSensor.Items.Add(new ComboBoxItem { Content = "Highest temp (any sensor)", Tag = HIGHEST_SENSOR });
                     foreach (var sg in availSensors) f.CurveSensor.Items.Add(new ComboBoxItem { Content = sg[1], Tag = sg[0] });
                     f.CurveSensor.SelectedIndex = 0;
                     sensRow.Children.Add(f.CurveSensor);
@@ -1322,7 +1364,9 @@ namespace RPMac {
                         if (Smc.WritesAllowed) {
                             foreach (var f in fans) {
                                 if (f.CurMode != "curve" || f.CurveSensorKey == null) continue;
-                                double t = Smc.ReadTemp(f.CurveSensorKey);
+                                double t = (f.CurveSensorKey == HIGHEST_SENSOR)
+                                    ? HighestCurated(curated)
+                                    : Smc.ReadTemp(f.CurveSensorKey);
                                 if (double.IsNaN(t)) continue;
                                 Smc.SetFanRpm(f.Index, CurveRpm(t, f.CtMin, f.CtMax, f.CrMin, f.CrMax));
                             }

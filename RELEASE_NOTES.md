@@ -1,3 +1,21 @@
+## RPMac v1.4.1
+
+**The other app capable of controlling fans on Intel Macs in Windows — for free.**
+
+### Fixed in 1.4.1
+- **Themes now switch correctly again.** Selecting a theme (Dark / Light / Nature / Japan) only changed the background — the accent color, controls and the highlighted button were left on the previous theme, so switching looked half-applied. The whole UI now recolors instantly and completely, and the selected theme is highlighted properly.
+- **Sliders, the scrollbar and the selected buttons now follow the theme too.** They were hardcoded to the dark palette, so they looked out of place in the light themes (an invisible slider handle on a white background, dark tracks, low-contrast button text). They now match every theme.
+
+### New in 1.4.1
+- **Curve on the hottest sensor.** The per-fan temperature curve has a new sensor option, **"Highest temp (any sensor)"**, which drives the fan from whichever sensor is currently hottest instead of a single fixed one — so the fan ramps up when *either* the CPU or the GPU gets hot. Useful on iMacs where the GPU is often the hottest part but the CPU can spike on its own. Requested by @Bibihi98.
+- **iMac17,1 confirmed working.** The iMac (Retina 5K, 27-inch, Late 2015) is now a verified model — fan control and temperature sensors both work. Thanks to @Bibihi98 for the report.
+
+### Download
+Download `RPMac-v1.4.1-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
+Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` together in the same folder.
+
+---
+
 ## RPMac v1.4.0
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**
