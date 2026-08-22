@@ -36,7 +36,7 @@ namespace RPMac {
         internal static readonly SolidColorBrush WARN   = (SolidColorBrush)B("#FFB340"); // ámbar: temperatura alta / read-only
         internal static readonly SolidColorBrush GOOD   = (SolidColorBrush)B("#34C759"); // verde: todo bien
 
-        const string VERSION = "1.5.0";
+        const string VERSION = "1.5.1";
 
         static void SetC(SolidColorBrush b, string hex) { b.Color = (Color)ColorConverter.ConvertFromString(hex); }
         static bool IsDark(string t) { return t != "light" && t != "japan"; }
@@ -529,6 +529,10 @@ namespace RPMac {
             var bd = new Border { Width = 46, Height = 46, Background = Brushes.Transparent, Child = p, Cursor = Cursors.Arrow };
             bd.MouseEnter += delegate { bd.Background = danger ? RED : CHIP; p.Stroke = danger ? Brushes.White : TXT; };
             bd.MouseLeave += delegate { bd.Background = Brushes.Transparent; p.Stroke = SUB; };
+            // Swallow the press: otherwise it bubbles to the title bar, which starts
+            // DragMove() — that captures the mouse and the button never sees the release,
+            // so the click silently does nothing.
+            bd.MouseLeftButtonDown += delegate (object s, MouseButtonEventArgs e) { e.Handled = true; };
             bd.MouseLeftButtonUp += delegate { onClick(); };
             return bd;
         }

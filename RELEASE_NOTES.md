@@ -1,3 +1,16 @@
+## RPMac v1.5.1
+
+**The other app capable of controlling fans on Intel Macs in Windows — for free.**
+
+### Fixed in 1.5.1
+- **The minimize and close buttons work again.** In 1.5.0's new title bar, pressing either button started a window drag instead, which swallowed the click — so the buttons appeared dead and the only ways out were the tray icon or Alt+F4. They now respond normally (close still hides RPMac to the tray, as it always has; quit from the tray menu). Dragging the window by the title bar is unaffected.
+
+### Download
+Download `RPMac-v1.5.1-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
+Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` together in the same folder.
+
+---
+
 ## RPMac v1.5.0
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**
