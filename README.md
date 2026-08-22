@@ -8,18 +8,30 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 
 ## Screenshots
 
+<p align="center">
+  <img src="docs/screenshots/main.png" alt="RPMac — fan control with a graphical temperature curve" width="820">
+</p>
+<p align="center">
+  <sub><b>Fans</b> — drag the curve points to shape it, watch the live dot ride the curve, and keep an eye on every sensor while you tune.</sub>
+</p>
+
 <table>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/screenshots/main.png" alt="Fan control and live temperatures" width="360"><br>
-      <sub><b>Fan control & live temperatures</b><br>Auto · Max · Manual · Curve, per fan</sub>
+      <img src="docs/screenshots/sensors.png" alt="All temperature sensors, grouped" width="410"><br>
+      <sub><b>Sensors</b><br>Grouped by CPU / GPU / system, with the raw SMC key</sub>
     </td>
     <td align="center" width="50%">
-      <img src="docs/screenshots/settings.png" alt="Settings, overlay options and themes" width="360"><br>
-      <sub><b>Settings, overlay options & themes</b><br>Start with Windows · °C/°F · Dark/Light/Nature/Japan</sub>
+      <img src="docs/screenshots/settings.png" alt="Settings, overlay options and themes" width="410"><br>
+      <sub><b>Settings</b><br>Start with Windows · °C/°F · tray mode · overlay · themes</sub>
     </td>
   </tr>
 </table>
+
+<p align="center">
+  <img src="docs/screenshots/light.png" alt="RPMac in the Light theme" width="560"><br>
+  <sub>Four themes — <b>Dark</b>, <b>Light</b>, <b>Nature</b> and <b>Japan</b> — applied instantly, window chrome included.</sub>
+</p>
 
 **On-screen overlay** (FRAPS-style, always on top — works over games in borderless/windowed mode):
 
@@ -38,25 +50,27 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 
 ## Features
 - Real-time fan RPM and temperature monitoring
-- Per-fan control: Auto / Max / custom RPM / **temperature curve**
-- **Per-fan temperature curve** — ramp RPM between a min and max temperature, driven either by a sensor you pick or by the **hottest sensor** ("Highest temp"), so the fan reacts to whichever of CPU/GPU is hottest
+- Per-fan control: **Auto / Max / Manual RPM / temperature curve**
+- **Graphical curve editor** — drag the points to shape the curve, and a live dot shows exactly where the fan is running on it right now
+- **Curve on the hottest sensor** — instead of picking one sensor, let the fan follow whichever is hottest, so it ramps up when *either* the CPU or the GPU heats up
+- **5-minute history graph** of temperature and fan speed
 - **Presets** — save your fan setup as named profiles (e.g. Silent, Gaming) and switch with one click, from the app or the tray icon
-- Command-line tool (`smccore.exe`) for scripting fan control
-- Curated, friendly temperature sensors (plus a raw view of every key)
+- All sensors grouped by CPU / GPU / system, with their raw SMC keys (plus a full raw view)
 - On-screen overlay (FRAPS-style): always-on-top, top-right corner, vertical or horizontal, with selectable fans/sensors
 - Live temperature on the tray icon (highest sensor or a specific one) — or just the app icon, or nothing
 - Themes: Dark / Light / Nature / Japan
 - Temperatures in °C or °F
 - Start with Windows + start minimized to tray
 - Remembers your settings and re-applies them (including after sleep/resume)
+- Command-line tool (`smccore.exe`) for scripting fan control
 - Safety first — read-only unless it confirms a genuine Apple Mac with a valid SMC; clamps RPM to the SMC's own min/max
-- Lightweight modern UI — nothing extra to install
+- Lightweight native UI — no runtime, no installer, nothing extra to install
 - Free and open source (GPL-2.0)
 
 ## Install
 No installer needed — it's a portable app.
 
-1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.4.1-windows.zip` (under **Assets**).
+1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.5.0-windows.zip` (under **Assets**).
 2. **Unzip it** to any folder you like (e.g. your Desktop). Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` **together in the same folder**.
 3. **Right-click `RPMac.exe` → "Run as administrator"** (administrator rights are required to access the Mac's hardware/SMC).
 4. Set each fan to **Auto / Max / a custom RPM**. Temperatures update live.

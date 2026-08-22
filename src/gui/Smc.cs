@@ -439,6 +439,27 @@ namespace RPMac {
             }
         }
 
+        // Nombre/ubicación del ventilador según el SMC (clave F<N>ID, struct {fds:
+        // [0..1] tipo, [2] zona, [3] ubicación, [4..15] nombre ASCII). Devuelve null si
+        // la clave no existe o el contenido no parece un nombre imprimible.
+        public static string FanName(int i) {
+            lock (gate) {
+                int len; string type;
+                string key = "F" + i + "ID";
+                if (!KeyInfo(key, out len, out type) || len < 16 || len > 32) return null;
+                byte[] b = new byte[len];
+                if (ReadSmc(READ_CMD, K(key), b, len) != 0) return null;
+                var sb = new StringBuilder();
+                for (int j = 4; j < 16; j++) {
+                    if (b[j] == 0) break;
+                    if (b[j] < 32 || b[j] > 126) return null;   // basura → mejor sin nombre
+                    sb.Append((char)b[j]);
+                }
+                string s = sb.ToString().Trim();
+                return s.Length >= 2 ? s : null;
+            }
+        }
+
         // Enumera las claves de sensores de temperatura una sola vez
         public static List<string> EnumTempKeys() {
             lock (gate) {

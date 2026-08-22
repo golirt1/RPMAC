@@ -1,3 +1,22 @@
+## RPMac v1.5.0
+
+**The other app capable of controlling fans on Intel Macs in Windows — for free.**
+
+A full redesign of the interface, and the curve editor RPMac always should have had.
+
+### What's new in 1.5.0
+- **Graphical curve editor.** The temperature curve is now a real chart you edit by **dragging its points**, instead of four sliders you had to imagine the result of. A **live dot** rides the curve showing exactly where the fan is running right now, and the axes label themselves in °C or °F.
+- **5-minute history graph.** A live chart of the hottest sensor and the fan speed, so you can actually see what your Mac is doing over time.
+- **Redesigned interface.** RPMac now has its own window chrome with a live temperature readout, an icon sidebar (**Fans · Sensors · Presets · Settings**) instead of one endless scrolling page, and a proper app icon. Sensors are grouped by CPU / GPU / system with their raw SMC keys, and values turn amber and then red as they get hot.
+- **Fan names from the SMC.** If your Mac reports a name for a fan (e.g. *EXHAUST*, *MAIN*), RPMac shows it, along with the fan's RPM range and a marker for the target speed on the speed bar.
+- Live temperatures stay visible next to the fan controls while you tune them.
+
+### Download
+Download `RPMac-v1.5.0-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
+Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` together in the same folder.
+
+---
+
 ## RPMac v1.4.1
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**

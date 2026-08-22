@@ -5,9 +5,13 @@ RPMac - Quick start
 2. Right-click RPMac.exe  ->  "Run as administrator"
    (administrator rights are required to access the Mac's hardware/SMC).
 3. Set each fan to Auto / Max / a custom RPM, or use "Curve" to ramp the fan
-   between a min and max temperature. Temperatures update live.
+   with temperature: drag the two points on the graph to shape the curve, and
+   the live dot shows where the fan is running on it. Pick a sensor, or leave
+   "Highest temp" so the fan follows whichever component is hottest.
    Tip: save your setup as a named preset and switch profiles with one click
    (also from the tray icon: right-click -> Presets).
+
+The sidebar has four pages: Fans, Sensors, Presets and Settings.
 
 Scripting (optional)
 --------------------

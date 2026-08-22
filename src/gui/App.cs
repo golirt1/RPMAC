@@ -11,6 +11,8 @@ using System.Windows.Input;
 using System.Windows.Markup;
 using System.Windows.Media;
 using System.Windows.Media.Effects;
+using System.Windows.Media.Imaging;
+using System.Windows.Shapes;
 using System.Windows.Interop;
 using System.Runtime.InteropServices;
 
@@ -30,6 +32,11 @@ namespace RPMac {
         internal static readonly SolidColorBrush BORDER = (SolidColorBrush)B("#3A3A42");
         internal static readonly SolidColorBrush BAR    = (SolidColorBrush)B("#202024"); // barra de estado
         internal static readonly SolidColorBrush OVBG   = (SolidColorBrush)B("#E61B1B1F"); // fondo del overlay (translucido)
+        // Colores de estado fijos (no cambian por tema: legibles sobre claro y oscuro)
+        internal static readonly SolidColorBrush WARN   = (SolidColorBrush)B("#FFB340"); // ámbar: temperatura alta / read-only
+        internal static readonly SolidColorBrush GOOD   = (SolidColorBrush)B("#34C759"); // verde: todo bien
+
+        const string VERSION = "1.5.0";
 
         static void SetC(SolidColorBrush b, string hex) { b.Color = (Color)ColorConverter.ConvertFromString(hex); }
         static bool IsDark(string t) { return t != "light" && t != "japan"; }
@@ -231,10 +238,25 @@ namespace RPMac {
             public Border CurveBtn, CurveApply;
             public UIElement CurveRow;
             public ComboBox CurveSensor;
+            // Los 4 sliders siguen siendo la "fuente de la verdad" de la curva (Apply y los
+            // presets leen/escriben sus .Value), pero ya no se muestran: el editor gráfico
+            // (canvas) los manipula al arrastrar y se re-dibuja cuando cambian.
             public Slider CtMinS, CtMaxS, CrMinS, CrMaxS;
-            public TextBlock CtMinV, CtMaxV, CrMinV, CrMaxV;
             public string CurveSensorKey;
             public double CtMin = 40, CtMax = 80, CrMin, CrMax;
+
+            // Editor gráfico de la curva
+            public Canvas CurveCv;
+            public Polyline CurveLine;
+            public Polygon CurveFill;
+            public Ellipse CurveP1, CurveP2, CurveLive;
+            public TextBlock CurveReadout, CvYMin, CvYMax;
+            public TextBlock[] CvTicks;
+            public int CurveDrag;                       // 0 = nada, 1 = punto min, 2 = punto max
+            public volatile float LastCurveTemp = float.NaN;   // temp actual del sensor de la curva
+
+            // Marca de RPM objetivo sobre la barra
+            public Border TargetTick;
         }
 
         readonly List<FanUi> fans = new List<FanUi>();
@@ -245,13 +267,25 @@ namespace RPMac {
         bool allLoaded = false;
         volatile bool showAll = false;
         TextBlock status;
+        Border statusDot;           // punto de estado en la barra inferior
+        TextBlock titleTemp;        // lectura viva en la barra de título
+
+        // Navegación por páginas (rail izquierdo)
+        Grid pageHost;
+        readonly Dictionary<string, ScrollViewer> pages = new Dictionary<string, ScrollViewer>();
+        readonly Dictionary<string, NavItem> navItems = new Dictionary<string, NavItem>();
+        class NavItem {
+            public Border Box;
+            public TextBlock Label;
+            public List<Shape> Shapes = new List<Shape>();
+        }
         StackPanel presetChips;     // vertical list, one row per saved preset
         TextBox presetNameBox;      // name field for saving the current config
         TextBlock presetPlaceholder; // faux placeholder for the name field
         string activePreset;        // name of the preset currently applied (null = none / custom)
         System.Windows.Forms.ToolStripMenuItem trayPresetsItem;  // tray "Presets" submenu
         volatile bool running = true;
-        const double BAR_W = 404;
+        const double BAR_W = 505;   // ancho de la barra de RPM (columna de ventiladores)
         ComboBox trayModeCombo;     // "Show in tray" dropdown
         System.Drawing.Icon staticIcon;  // cached default "R" icon
         IntPtr staticIconHandle = IntPtr.Zero;
@@ -270,7 +304,22 @@ namespace RPMac {
 
         public MainWindow() {
             Title = "RPMac";
-            Width = 470; Height = 690;
+            Width = 940; Height = 566;
+            ResizeMode = ResizeMode.CanMinimize;   // layout fijo, estilo utilidad de escritorio
+            WindowStyle = WindowStyle.None;        // barra de título propia (ver BuildTitleBar)
+            // WindowChrome mantiene el comportamiento nativo (snap, sombra, taskbar) aunque
+            // dibujemos nosotros la barra: CaptionHeight 0 => el arrastre lo hace DragMove.
+            try {
+                var chrome = new System.Windows.Shell.WindowChrome {
+                    CaptionHeight = 0,
+                    ResizeBorderThickness = new Thickness(0),
+                    GlassFrameThickness = new Thickness(0),
+                    CornerRadius = new CornerRadius(0),
+                    UseAeroCaptionButtons = false
+                };
+                System.Windows.Shell.WindowChrome.SetWindowChrome(this, chrome);
+            } catch { }
+            try { Icon = AppIconSource(); } catch { }
             Background = BG; Foreground = TXT;
             FontFamily = new FontFamily("Segoe UI");
             WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -296,20 +345,45 @@ namespace RPMac {
             var root = new DockPanel();
             Content = root;
 
-            var header = new StackPanel { Margin = new Thickness(20, 18, 20, 6) };
-            header.Children.Add(new TextBlock { Text = "RPMac", FontSize = 24, FontWeight = FontWeights.Bold, Foreground = TXT });
-            header.Children.Add(new TextBlock { Text = "The other app capable of controlling fans on Intel Macs in Windows — for free.", FontSize = 12, Foreground = SUB, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 3, 0, 0) });
-            DockPanel.SetDock(header, Dock.Top);
-            root.Children.Add(header);
+            var titleBar = BuildTitleBar();
+            DockPanel.SetDock(titleBar, Dock.Top);
+            root.Children.Add(titleBar);
 
-            var statusBar = new Border { Background = BAR, Child = (status = new TextBlock { Text = "Starting…", FontSize = 11, Foreground = SUB, Margin = new Thickness(20, 7, 20, 7) }) };
+            // Barra de estado con punto indicador (verde = OK, ámbar = solo lectura)
+            var statusRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(18, 6, 18, 6) };
+            statusDot = new Border { Width = 7, Height = 7, CornerRadius = new CornerRadius(3.5), Background = SUB, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) };
+            status = new TextBlock { Text = "Starting…", FontSize = 11, Foreground = SUB, VerticalAlignment = VerticalAlignment.Center };
+            statusRow.Children.Add(statusDot);
+            statusRow.Children.Add(status);
+            var statusBar = new Border { Background = BAR, BorderBrush = BORDER, BorderThickness = new Thickness(0, 1, 0, 0), Child = statusRow };
             DockPanel.SetDock(statusBar, Dock.Bottom);
             root.Children.Add(statusBar);
 
-            var scroll = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Padding = new Thickness(14, 2, 8, 2) };
+            // Rail de navegación a la izquierda + área de páginas a la derecha.
+            var main = new Grid();
+            main.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(74) });
+            main.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            root.Children.Add(main);
+
+            var nav = BuildNavRail();
+            Grid.SetColumn(nav, 0);
+            main.Children.Add(nav);
+
+            pageHost = new Grid { Margin = new Thickness(0) };
+            Grid.SetColumn(pageHost, 1);
+            main.Children.Add(pageHost);
+
+            // Página de ventiladores: controles a la izquierda, lectura viva a la derecha
+            // (poder ver las temperaturas mientras ajustas es justo lo que uno necesita).
+            var fansPage = NewPage("fans");
+            var fansGrid = new Grid();
+            fansGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            fansGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(272) });
             var stack = new StackPanel();
-            scroll.Content = stack;
-            root.Children.Add(scroll);
+            Grid.SetColumn(stack, 0); fansGrid.Children.Add(stack);
+            var liveCol = new StackPanel();
+            Grid.SetColumn(liveCol, 1); fansGrid.Children.Add(liveCol);
+            fansPage.Children.Add(fansGrid);
 
             if (!Smc.IsInpOutDriverOpen())
                 stack.Children.Add(Card(new TextBlock { Text = "Couldn't open the I/O driver (InpOut).\nRun the app as administrator.", Foreground = RED, TextWrapping = TextWrapping.Wrap }));
@@ -318,15 +392,19 @@ namespace RPMac {
             Smc.Validate();
             if (!Smc.WritesAllowed) {
                 var warn = new StackPanel();
-                warn.Children.Add(new TextBlock { Text = "⚠  Read-only mode", FontSize = 14, FontWeight = FontWeights.Bold, Foreground = B("#FFB340") });
+                warn.Children.Add(new TextBlock { Text = "⚠  Read-only mode", FontSize = 14, FontWeight = FontWeights.Bold, Foreground = WARN });
                 warn.Children.Add(new TextBlock { Text = Smc.SafetyReason, Foreground = TXT, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
                 stack.Children.Add(Card(warn));
             }
 
             BuildFans(stack);
-            BuildPresetsCard(stack);
-            BuildTempsCard(stack);
-            BuildSettingsCard(stack);
+            BuildHistoryCard(stack);
+            BuildLiveTemps(liveCol);
+
+            BuildTempsPane(NewPage("sensors"));
+            BuildPresetsCard(NewPage("profiles"));
+            BuildSettingsCard(NewPage("settings"));
+            ShowPage("fans");
 
             Loaded += delegate {
                 // Each step is isolated so one failure can't take down startup or hide the
@@ -345,12 +423,176 @@ namespace RPMac {
 
         Border Card(UIElement content) {
             return new Border {
-                Background = CARD, CornerRadius = new CornerRadius(14),
+                Background = CARD, CornerRadius = new CornerRadius(12),
                 BorderBrush = BORDER, BorderThickness = new Thickness(1),
-                Padding = new Thickness(18), Margin = new Thickness(6, 8, 6, 4),
-                Effect = new DropShadowEffect { Color = Colors.Black, BlurRadius = 14, ShadowDepth = 0, Opacity = 0.35 },
+                Padding = new Thickness(18, 16, 18, 16), Margin = new Thickness(6, 6, 6, 10),
+                Effect = new DropShadowEffect { Color = Colors.Black, BlurRadius = 10, ShadowDepth = 1, Opacity = 0.16 },
                 Child = content
             };
+        }
+
+        // Rótulo de sección: mayúsculas pequeñas con tracking (jerarquía tipográfica)
+        static TextBlock SectionLabel(string text, double topMargin) {
+            return new TextBlock {
+                Text = text.ToUpperInvariant(), FontSize = 10, FontWeight = FontWeights.SemiBold,
+                Foreground = SUB, Opacity = 0.9, Margin = new Thickness(0, topMargin, 0, 6)
+            };
+        }
+
+        // ---- Iconos vectoriales ---------------------------------------------------
+        // Trazo (24x24). Devuelve el contenedor y acumula las formas para poder recolorear.
+        static UIElement StrokeIcon(double size, string[] datas, List<Shape> bag) {
+            var cv = new Canvas { Width = 24, Height = 24 };
+            foreach (var d in datas) {
+                var p = new Path {
+                    Data = Geometry.Parse(d), Stroke = SUB, StrokeThickness = 1.9,
+                    StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+                    StrokeLineJoin = PenLineJoin.Round
+                };
+                cv.Children.Add(p);
+                if (bag != null) bag.Add(p);
+            }
+            return new Viewbox { Width = size, Height = size, Child = cv, HorizontalAlignment = HorizontalAlignment.Center };
+        }
+
+        // Ventilador de 3 aspas (el mismo dibujo del icono de la app), relleno.
+        const string BLADE_PATH = "M42.5,41 C25,24 38,4 54,10 C65,14.5 64,31 58.5,42.5 Z";
+        static UIElement FanGlyph(double size, List<Shape> bag) {
+            var cv = new Canvas { Width = 100, Height = 100 };
+            for (int i = 0; i < 3; i++) {
+                var p = new Path {
+                    Data = Geometry.Parse(BLADE_PATH), Fill = SUB, Tag = "fill",
+                    RenderTransform = new RotateTransform(i * 120, 50, 50)
+                };
+                cv.Children.Add(p);
+                if (bag != null) bag.Add(p);
+            }
+            var hub = new Ellipse { Width = 21, Height = 21, Fill = SUB, Tag = "fill" };
+            Canvas.SetLeft(hub, 39.5); Canvas.SetTop(hub, 39.5);
+            cv.Children.Add(hub);
+            if (bag != null) bag.Add(hub);
+            return new Viewbox { Width = size, Height = size, Child = cv, HorizontalAlignment = HorizontalAlignment.Center };
+        }
+
+        static void Recolor(List<Shape> shapes, Brush b) {
+            foreach (var s in shapes) {
+                if ("fill".Equals(s.Tag)) s.Fill = b; else s.Stroke = b;
+            }
+        }
+
+        // Icono de la app tomado del propio .exe (recurso win32), para ventana y bandeja.
+        static ImageSource appIconSrc;
+        static ImageSource AppIconSource() {
+            if (appIconSrc != null) return appIconSrc;
+            try {
+                string exe = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                using (var ic = System.Drawing.Icon.ExtractAssociatedIcon(exe))
+                    appIconSrc = Imaging.CreateBitmapSourceFromHIcon(ic.Handle, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+            } catch { }
+            return appIconSrc;
+        }
+
+        // ---- Barra de título propia ----------------------------------------------
+        UIElement BuildTitleBar() {
+            var grid = new Grid { Height = 46, Background = BAR };
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var left = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(16, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+            var ico = AppIconSource();
+            if (ico != null) left.Children.Add(new Image { Source = ico, Width = 18, Height = 18, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 9, 0) });
+            left.Children.Add(new TextBlock { Text = "RPMac", FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = TXT, VerticalAlignment = VerticalAlignment.Center });
+            left.Children.Add(new TextBlock { Text = "v" + VERSION, FontSize = 10.5, Foreground = SUB, Opacity = 0.8, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 1, 0, 0) });
+            titleTemp = new TextBlock { Text = "", FontSize = 11.5, Foreground = SUB, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(18, 1, 0, 0) };
+            left.Children.Add(titleTemp);
+            grid.Children.Add(left);
+
+            var btns = new StackPanel { Orientation = Orientation.Horizontal };
+            btns.Children.Add(CaptionButton("M0,0 H10", false, delegate { WindowState = WindowState.Minimized; }));
+            btns.Children.Add(CaptionButton("M0,0 L10,10 M10,0 L0,10", true, delegate { HideToTray(); }));
+            Grid.SetColumn(btns, 1);
+            grid.Children.Add(btns);
+
+            // Arrastrar la ventana desde la barra (CaptionHeight = 0 en WindowChrome)
+            grid.MouseLeftButtonDown += delegate (object s, MouseButtonEventArgs e) {
+                if (e.ButtonState == MouseButtonState.Pressed) { try { DragMove(); } catch { } }
+            };
+            return grid;
+        }
+
+        Border CaptionButton(string geom, bool danger, Action onClick) {
+            var p = new Path {
+                Data = Geometry.Parse(geom), Stroke = SUB, StrokeThickness = 1.2,
+                StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
+            };
+            var bd = new Border { Width = 46, Height = 46, Background = Brushes.Transparent, Child = p, Cursor = Cursors.Arrow };
+            bd.MouseEnter += delegate { bd.Background = danger ? RED : CHIP; p.Stroke = danger ? Brushes.White : TXT; };
+            bd.MouseLeave += delegate { bd.Background = Brushes.Transparent; p.Stroke = SUB; };
+            bd.MouseLeftButtonUp += delegate { onClick(); };
+            return bd;
+        }
+
+        // ---- Rail de navegación ---------------------------------------------------
+        UIElement BuildNavRail() {
+            var panel = new StackPanel { Background = BAR };
+            var wrap = new Border { Background = BAR, BorderBrush = BORDER, BorderThickness = new Thickness(0, 0, 1, 0), Child = panel };
+
+            panel.Children.Add(NavButton("fans", "Fans", null));
+            panel.Children.Add(NavButton("sensors", "Sensors", new[] {
+                "M14.5,13.6 V5.5 a2.5,2.5 0 0 0 -5,0 V13.6 a4.5,4.5 0 1 0 5,0 Z",
+                "M12,9.5 V15.2"
+            }));
+            panel.Children.Add(NavButton("profiles", "Presets", new[] {
+                "M7,3.5 h10 a1,1 0 0 1 1,1 V20.5 l-6,-4 -6,4 V4.5 a1,1 0 0 1 1,-1 Z"
+            }));
+            panel.Children.Add(NavButton("settings", "Settings", new[] {
+                "M3.5,7 h9.5 M17.5,7 h3 M3.5,12 h3.5 M11.5,12 h9 M3.5,17 h11 M19,17 h1.5",
+                "M13,7 a2.25,2.25 0 1 0 4.5,0 a2.25,2.25 0 1 0 -4.5,0",
+                "M7,12 a2.25,2.25 0 1 0 4.5,0 a2.25,2.25 0 1 0 -4.5,0",
+                "M14.5,17 a2.25,2.25 0 1 0 4.5,0 a2.25,2.25 0 1 0 -4.5,0"
+            }));
+            return wrap;
+        }
+
+        Border NavButton(string key, string label, string[] iconData) {
+            var it = new NavItem();
+            var col = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center };
+            col.Children.Add(iconData == null ? FanGlyph(21, it.Shapes) : StrokeIcon(21, iconData, it.Shapes));
+            it.Label = new TextBlock { Text = label, FontSize = 9.5, Foreground = SUB, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 5, 0, 0) };
+            col.Children.Add(it.Label);
+
+            it.Box = new Border {
+                Margin = new Thickness(8, 8, 8, 0), Padding = new Thickness(0, 10, 0, 9),
+                CornerRadius = new CornerRadius(10), Background = Brushes.Transparent,
+                Cursor = Cursors.Hand, Child = col
+            };
+            it.Box.MouseEnter += delegate { if (currentPage != key) it.Box.Background = CHIP; };
+            it.Box.MouseLeave += delegate { if (currentPage != key) it.Box.Background = Brushes.Transparent; };
+            it.Box.MouseLeftButtonUp += delegate { ShowPage(key); };
+            navItems[key] = it;
+            return it.Box;
+        }
+
+        string currentPage = "";
+
+        StackPanel NewPage(string key) {
+            var sp = new StackPanel { Margin = new Thickness(8, 10, 14, 12) };
+            var sv = new ScrollViewer { VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Content = sp, Visibility = Visibility.Collapsed };
+            pages[key] = sv;
+            pageHost.Children.Add(sv);
+            return sp;
+        }
+
+        void ShowPage(string key) {
+            currentPage = key;
+            foreach (var kv in pages) kv.Value.Visibility = (kv.Key == key) ? Visibility.Visible : Visibility.Collapsed;
+            foreach (var kv in navItems) {
+                bool sel = (kv.Key == key);
+                kv.Value.Box.Background = sel ? ACCENT : Brushes.Transparent;
+                kv.Value.Label.Foreground = sel ? Brushes.White : SUB;
+                Recolor(kv.Value.Shapes, sel ? Brushes.White : SUB);
+            }
         }
 
         Border Chip(string text, Brush bg, Brush fg, MouseButtonEventHandler onClick) {
@@ -372,11 +614,29 @@ namespace RPMac {
             return false;
         }
 
+        // Un segmento del selector de modo. Se distingue por Tag = "seg": su fondo
+        // inactivo es transparente (el contenedor ya pinta), no CHIP.
+        Border SegButton(string text, MouseButtonEventHandler onClick) {
+            var tb = new TextBlock {
+                Text = text, Foreground = TXT, FontSize = 12.5, FontWeight = FontWeights.SemiBold,
+                HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center
+            };
+            var bd = new Border {
+                Background = Brushes.Transparent, CornerRadius = new CornerRadius(7),
+                Padding = new Thickness(0, 7, 0, 7), Width = 92, Cursor = Cursors.Hand,
+                Tag = "seg", Child = tb
+            };
+            bd.MouseEnter += delegate { if (bd.Background == Brushes.Transparent) bd.Background = CHIP; };
+            bd.MouseLeave += delegate { if (bd.Background == CHIP) bd.Background = Brushes.Transparent; };
+            bd.MouseLeftButtonUp += onClick;
+            return bd;
+        }
+
         // Highlight a mode chip: colored background + white label when active, so the text
         // stays readable on the accent/red fill in the light themes too (not just dark).
         static void SetChipActive(Border chip, bool active, Brush activeBg) {
             if (chip == null) return;
-            chip.Background = active ? activeBg : CHIP;
+            chip.Background = active ? activeBg : ("seg".Equals(chip.Tag) ? Brushes.Transparent : (Brush)CHIP);
             var tb = chip.Child as TextBlock;
             if (tb != null) tb.Foreground = active ? Brushes.White : TXT;
         }
@@ -424,18 +684,179 @@ namespace RPMac {
             return temp;
         }
 
-        // One labeled slider row used by the curve editor. Live-updates its value label.
-        StackPanel CurveSliderRow(string label, Slider s, TextBlock val, string unit) {
-            var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
-            row.Children.Add(new TextBlock { Text = label, Foreground = SUB, Width = 70, VerticalAlignment = VerticalAlignment.Center, FontSize = 12 });
-            s.Width = 200; s.VerticalAlignment = VerticalAlignment.Center;
-            row.Children.Add(s);
-            val.Text = ((int)s.Value) + unit; val.Foreground = TXT; val.Width = 70;
-            val.VerticalAlignment = VerticalAlignment.Center; val.Margin = new Thickness(10, 0, 0, 0);
-            val.FontWeight = FontWeights.SemiBold; val.FontSize = 12;
-            s.ValueChanged += delegate { val.Text = ((int)s.Value) + unit; };
-            row.Children.Add(val);
-            return row;
+        // ---- Editor gráfico de la curva -------------------------------------------
+        // Dibuja la curva temp→RPM en un canvas con dos puntos arrastrables (min y max).
+        // Los 4 sliders ocultos siguen guardando los valores (Apply/presets no cambian);
+        // arrastrar un punto actualiza los sliders y cualquier cambio de slider re-dibuja.
+        const double CV_W = 505, CV_H = 172;             // tamaño del canvas
+        const double CVL = 36, CVR = 10, CVT = 12, CVB = 20; // padding: ejes izq/der/arriba/abajo
+        const double CV_TMAX = 110;                      // rango del eje X en °C
+
+        double CvX(double t) {
+            if (t < 0) t = 0; if (t > CV_TMAX) t = CV_TMAX;
+            return CVL + (t / CV_TMAX) * (CV_W - CVL - CVR);
+        }
+        double CvY(FanUi f, double r) {
+            double f01 = (f.Max > f.Min) ? (r - f.Min) / (f.Max - f.Min) : 0;
+            if (f01 < 0) f01 = 0; if (f01 > 1) f01 = 1;
+            return (CV_H - CVB) - f01 * (CV_H - CVB - CVT);
+        }
+
+        static string ShortTemp(double c) {
+            return Settings.Fahrenheit
+                ? string.Format("{0:0}°F", c * 9.0 / 5.0 + 32.0)
+                : string.Format("{0:0}°C", c);
+        }
+
+        UIElement BuildCurveCanvas(FanUi f) {
+            var wrap = new StackPanel();
+
+            f.CurveCv = new Canvas { Width = CV_W, Height = CV_H, Background = Brushes.Transparent, ClipToBounds = true };
+
+            // Rejilla: líneas verticales cada 20°C + eje inferior. Comparten brushes del
+            // tema (BORDER/SUB), así que siguen al tema automáticamente.
+            var ticks = new List<TextBlock>();
+            for (int t = 20; t <= 100; t += 20) {
+                var gl = new Line { X1 = CvX(t), Y1 = CVT, X2 = CvX(t), Y2 = CV_H - CVB, Stroke = BORDER, StrokeThickness = 1 };
+                f.CurveCv.Children.Add(gl);
+                var lb = new TextBlock { Text = t + "°", FontSize = 9.5, Foreground = SUB };
+                Canvas.SetLeft(lb, CvX(t) - 9); Canvas.SetTop(lb, CV_H - CVB + 3);
+                f.CurveCv.Children.Add(lb);
+                ticks.Add(lb);
+            }
+            f.CvTicks = ticks.ToArray();
+            f.CurveCv.Children.Add(new Line { X1 = CVL, Y1 = CV_H - CVB, X2 = CV_W - CVR, Y2 = CV_H - CVB, Stroke = BORDER, StrokeThickness = 1 });
+
+            // Etiquetas del eje Y (RPM min y max del ventilador)
+            f.CvYMin = new TextBlock { Text = ((int)f.Min).ToString(), FontSize = 9.5, Foreground = SUB, Width = CVL - 6, TextAlignment = TextAlignment.Right };
+            Canvas.SetLeft(f.CvYMin, 0); Canvas.SetTop(f.CvYMin, CV_H - CVB - 7);
+            f.CurveCv.Children.Add(f.CvYMin);
+            f.CvYMax = new TextBlock { Text = ((int)f.Max).ToString(), FontSize = 9.5, Foreground = SUB, Width = CVL - 6, TextAlignment = TextAlignment.Right };
+            Canvas.SetLeft(f.CvYMax, 0); Canvas.SetTop(f.CvYMax, CVT - 7);
+            f.CurveCv.Children.Add(f.CvYMax);
+
+            // Área bajo la curva + la curva
+            f.CurveFill = new Polygon { Fill = ACCENT, Opacity = 0.14 };
+            f.CurveCv.Children.Add(f.CurveFill);
+            f.CurveLine = new Polyline { Stroke = ACCENT, StrokeThickness = 2.5, StrokeLineJoin = PenLineJoin.Round };
+            f.CurveCv.Children.Add(f.CurveLine);
+
+            // Punto vivo: dónde está el ventilador AHORA sobre la curva (solo en modo curve)
+            f.CurveLive = new Ellipse { Width = 9, Height = 9, Fill = RED, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
+            f.CurveCv.Children.Add(f.CurveLive);
+
+            // Puntos arrastrables (anillos)
+            f.CurveP1 = MakeThumb(f, 1);
+            f.CurveP2 = MakeThumb(f, 2);
+            f.CurveCv.Children.Add(f.CurveP1);
+            f.CurveCv.Children.Add(f.CurveP2);
+
+            var frame = new Border {
+                Background = BAR, CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(0, 4, 0, 2), Margin = new Thickness(0, 8, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Child = f.CurveCv
+            };
+            wrap.Children.Add(frame);
+
+            f.CurveReadout = new TextBlock { FontSize = 12, Foreground = SUB, Margin = new Thickness(2, 6, 0, 0) };
+            wrap.Children.Add(f.CurveReadout);
+
+            // Cualquier cambio en los sliders ocultos (arrastre, presets, restore) re-dibuja
+            RoutedPropertyChangedEventHandler<double> onChange = delegate { RenderCurve(f); };
+            f.CtMinS.ValueChanged += onChange; f.CtMaxS.ValueChanged += onChange;
+            f.CrMinS.ValueChanged += onChange; f.CrMaxS.ValueChanged += onChange;
+
+            RenderCurve(f);
+            return wrap;
+        }
+
+        Ellipse MakeThumb(FanUi f, int which) {
+            var el = new Ellipse {
+                Width = 16, Height = 16,
+                Fill = CARD, Stroke = ACCENT, StrokeThickness = 3,
+                Cursor = Cursors.Hand,
+                ToolTip = which == 1 ? "Drag: below this temperature the fan runs at this RPM"
+                                     : "Drag: above this temperature the fan runs at this RPM"
+            };
+            el.MouseLeftButtonDown += delegate (object s, MouseButtonEventArgs e) {
+                f.CurveDrag = which; el.CaptureMouse(); e.Handled = true;
+            };
+            el.MouseLeftButtonUp += delegate (object s, MouseButtonEventArgs e) {
+                if (f.CurveDrag == which) { f.CurveDrag = 0; el.ReleaseMouseCapture(); }
+            };
+            el.MouseMove += delegate (object s, MouseEventArgs e) {
+                if (f.CurveDrag != which) return;
+                DragCurvePoint(f, which, e.GetPosition(f.CurveCv));
+            };
+            return el;
+        }
+
+        void DragCurvePoint(FanUi f, int which, Point p) {
+            // posición → valores (inverso de CvX/CvY), redondeados a enteros
+            double temp = (p.X - CVL) / (CV_W - CVL - CVR) * CV_TMAX;
+            if (temp < 0) temp = 0; if (temp > CV_TMAX) temp = CV_TMAX;
+            double f01 = ((CV_H - CVB) - p.Y) / (CV_H - CVB - CVT);
+            if (f01 < 0) f01 = 0; if (f01 > 1) f01 = 1;
+            double rpm = f.Min + f01 * (f.Max - f.Min);
+
+            if (which == 1) {
+                if (temp > f.CtMaxS.Value - 2) temp = f.CtMaxS.Value - 2;
+                if (rpm > f.CrMaxS.Value) rpm = f.CrMaxS.Value;
+                f.CtMinS.Value = Math.Round(temp);
+                f.CrMinS.Value = Math.Round(rpm);
+            } else {
+                if (temp < f.CtMinS.Value + 2) temp = f.CtMinS.Value + 2;
+                if (rpm < f.CrMinS.Value) rpm = f.CrMinS.Value;
+                f.CtMaxS.Value = Math.Round(temp);
+                f.CrMaxS.Value = Math.Round(rpm);
+            }
+        }
+
+        // Re-dibuja la curva desde los valores actuales de los sliders ocultos.
+        void RenderCurve(FanUi f) {
+            if (f.CurveCv == null) return;
+            double tmin = f.CtMinS.Value, tmax = f.CtMaxS.Value;
+            double rmin = f.CrMinS.Value, rmax = f.CrMaxS.Value;
+            double x1 = CvX(tmin), y1 = CvY(f, rmin);
+            double x2 = CvX(tmax), y2 = CvY(f, rmax);
+            double xl = CVL, xr = CV_W - CVR, yb = CV_H - CVB;
+
+            var line = new PointCollection();
+            line.Add(new Point(xl, y1)); line.Add(new Point(x1, y1));
+            line.Add(new Point(x2, y2)); line.Add(new Point(xr, y2));
+            f.CurveLine.Points = line;
+
+            var fill = new PointCollection();
+            fill.Add(new Point(xl, yb)); fill.Add(new Point(xl, y1)); fill.Add(new Point(x1, y1));
+            fill.Add(new Point(x2, y2)); fill.Add(new Point(xr, y2)); fill.Add(new Point(xr, yb));
+            f.CurveFill.Points = fill;
+
+            Canvas.SetLeft(f.CurveP1, x1 - 8); Canvas.SetTop(f.CurveP1, y1 - 8);
+            Canvas.SetLeft(f.CurveP2, x2 - 8); Canvas.SetTop(f.CurveP2, y2 - 8);
+
+            // Etiquetas de ticks en °C o °F según la preferencia
+            if (f.CvTicks != null) {
+                int i = 0;
+                for (int t = 20; t <= 100 && i < f.CvTicks.Length; t += 20, i++)
+                    f.CvTicks[i].Text = Settings.Fahrenheit ? ((int)Math.Round(t * 9.0 / 5.0 + 32)) + "°" : t + "°";
+            }
+            if (f.CvYMin != null) f.CvYMin.Text = ((int)f.Min).ToString();
+            if (f.CvYMax != null) f.CvYMax.Text = ((int)f.Max).ToString();
+
+            f.CurveReadout.Text = string.Format("Below {0} → {1:0} RPM   ·   above {2} → {3:0} RPM",
+                ShortTemp(tmin), rmin, ShortTemp(tmax), rmax);
+        }
+
+        // Coloca el punto vivo de la curva (temp actual → RPM que pide la curva).
+        void UpdateCurveLive(FanUi f) {
+            if (f.CurveCv == null || f.CurveLive == null) return;
+            float t = f.LastCurveTemp;
+            if (f.CurMode != "curve" || float.IsNaN(t)) { f.CurveLive.Visibility = Visibility.Collapsed; return; }
+            double rpm = CurveRpm(t, f.CtMin, f.CtMax, f.CrMin, f.CrMax);
+            Canvas.SetLeft(f.CurveLive, CvX(t) - 4.5);
+            Canvas.SetTop(f.CurveLive, CvY(f, rpm) - 4.5);
+            f.CurveLive.Visibility = Visibility.Visible;
         }
 
         // Read the curve editor controls, validate, cache the values on the FanUi (so the
@@ -471,39 +892,69 @@ namespace RPMac {
                 double fmn = double.IsNaN(fi.Min) ? 0 : fi.Min;
                 var f = new FanUi { Index = fi.Index, Max = double.IsNaN(fi.Max) ? 6000 : fi.Max, Min = fmn };
                 var col = new StackPanel();
-                col.Children.Add(new TextBlock { Text = "FAN " + fi.Index, FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = SUB });
 
-                // RPM grande + unidad
-                var rpmRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
+                // Cabecera: nombre del fan a la izquierda, RPM grande a la derecha (estilo escritorio)
+                string fname = null;
+                try { fname = Smc.FanName(fi.Index); } catch { }
+                var head = new Grid { Margin = new Thickness(0, 0, 0, 2) };
+                head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var headL = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom };
+                headL.Children.Add(new TextBlock {
+                    Text = fname == null ? ("FAN " + fi.Index) : ("FAN " + fi.Index + " · " + fname.ToUpperInvariant()),
+                    FontSize = 11, FontWeight = FontWeights.SemiBold, Foreground = SUB
+                });
+                headL.Children.Add(new TextBlock {
+                    Text = string.Format("{0:0}–{1:0} RPM range", fmn, double.IsNaN(fi.Max) ? 6000 : fi.Max),
+                    FontSize = 11, Foreground = SUB, Opacity = 0.75, Margin = new Thickness(0, 2, 0, 4)
+                });
+                head.Children.Add(headL);
+                var rpmRow = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Bottom };
                 f.Rpm = new TextBlock { Text = "—", FontSize = 34, FontWeight = FontWeights.Bold, Foreground = TXT };
                 rpmRow.Children.Add(f.Rpm);
                 rpmRow.Children.Add(new TextBlock { Text = "RPM", FontSize = 13, Foreground = SUB, VerticalAlignment = VerticalAlignment.Bottom, Margin = new Thickness(6, 0, 0, 7) });
-                col.Children.Add(rpmRow);
+                Grid.SetColumn(rpmRow, 1);
+                head.Children.Add(rpmRow);
+                col.Children.Add(head);
 
-                // barra visual de RPM
-                var track = new Border { Background = CHIP, CornerRadius = new CornerRadius(4), Height = 8, Width = BAR_W, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 2, 0, 8) };
+                // barra visual de RPM, con una marca vertical en el RPM objetivo (target)
+                var barGrid = new Grid { Width = BAR_W, Height = 14, HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 2, 0, 8) };
+                var track = new Border { Background = CHIP, CornerRadius = new CornerRadius(4), Height = 8, VerticalAlignment = VerticalAlignment.Center };
                 f.BarFill = new Border { Background = ACCENT, CornerRadius = new CornerRadius(4), Height = 8, Width = 0, HorizontalAlignment = HorizontalAlignment.Left };
                 track.Child = f.BarFill;
-                col.Children.Add(track);
+                barGrid.Children.Add(track);
+                f.TargetTick = new Border { Width = 2, Background = SUB, HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Stretch, Visibility = Visibility.Collapsed, ToolTip = "Target RPM" };
+                barGrid.Children.Add(f.TargetTick);
+                col.Children.Add(barGrid);
 
                 f.Info = new TextBlock { Text = "", FontSize = 12, Foreground = SUB, Margin = new Thickness(0, 0, 0, 12) };
                 col.Children.Add(f.Info);
 
-                var chips = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 12) };
-                f.Auto = Chip("Auto", CHIP, TXT, delegate { if (!Guard()) return; Smc.SetFanAuto(f.Index); SetMode(f, "auto"); Settings.SetFan(f.Index, "auto", 0); ClearActivePreset(); });
-                f.MaxBtn = Chip("Max", CHIP, TXT, delegate { if (!Guard()) return; Smc.SetFanMax(f.Index); SetMode(f, "max"); Settings.SetFan(f.Index, "max", 0); ClearActivePreset(); });
-                f.Manual = Chip("Manual", CHIP, TXT, delegate { if (!Guard()) return; SetMode(f, "manual"); });
-                chips.Children.Add(f.Auto); chips.Children.Add(f.MaxBtn); chips.Children.Add(f.Manual);
+                // Selector de modo como control segmentado (una sola pieza, no 4 botones sueltos)
+                var seg = new StackPanel { Orientation = Orientation.Horizontal };
+                f.Auto = SegButton("Auto", delegate { if (!Guard()) return; Smc.SetFanAuto(f.Index); SetMode(f, "auto"); Settings.SetFan(f.Index, "auto", 0); ClearActivePreset(); });
+                f.MaxBtn = SegButton("Max", delegate { if (!Guard()) return; Smc.SetFanMax(f.Index); SetMode(f, "max"); Settings.SetFan(f.Index, "max", 0); ClearActivePreset(); });
+                f.Manual = SegButton("Manual", delegate { if (!Guard()) return; SetMode(f, "manual"); });
+                f.Auto.ToolTip = "Give the fan back to the Mac's own thermal control";
+                f.MaxBtn.ToolTip = "Run this fan at full speed";
+                f.Manual.ToolTip = "Hold a fixed RPM you choose";
+                seg.Children.Add(f.Auto); seg.Children.Add(f.MaxBtn); seg.Children.Add(f.Manual);
                 if (availSensors.Count > 0) {
-                    f.CurveBtn = Chip("Curve", CHIP, TXT, delegate { if (!Guard()) return; SetMode(f, "curve"); });
-                    chips.Children.Add(f.CurveBtn);
+                    f.CurveBtn = SegButton("Curve", delegate { if (!Guard()) return; SetMode(f, "curve"); });
+                    f.CurveBtn.ToolTip = "Ramp the RPM automatically from a temperature sensor";
+                    seg.Children.Add(f.CurveBtn);
                 }
-                col.Children.Add(chips);
+                col.Children.Add(new Border {
+                    Background = BAR, BorderBrush = BORDER, BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(10), Padding = new Thickness(3),
+                    HorizontalAlignment = HorizontalAlignment.Left, Margin = new Thickness(0, 2, 0, 14),
+                    Child = seg
+                });
 
                 var manualRow = new StackPanel { Orientation = Orientation.Horizontal };
                 double mn = double.IsNaN(fi.Min) ? 0 : fi.Min;
                 double tg = double.IsNaN(fi.Target) ? mn : fi.Target;
-                f.Slider = new Slider { Minimum = mn, Maximum = f.Max, Value = tg, Width = 250, IsEnabled = false, VerticalAlignment = VerticalAlignment.Center };
+                f.Slider = new Slider { Minimum = mn, Maximum = f.Max, Value = tg, Width = 390, IsEnabled = false, VerticalAlignment = VerticalAlignment.Center };
                 f.SliderVal = new TextBlock { Text = ((int)tg) + " RPM", Foreground = TXT, Width = 80, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(12, 0, 0, 0), FontWeight = FontWeights.SemiBold };
                 f.Slider.ValueChanged += delegate { f.SliderVal.Text = ((int)f.Slider.Value) + " RPM"; };
                 manualRow.Children.Add(f.Slider);
@@ -531,16 +982,14 @@ namespace RPMac {
                     sensRow.Children.Add(f.CurveSensor);
                     cv.Children.Add(sensRow);
 
+                    // Sliders ocultos: guardan los valores de la curva (Apply y presets los leen);
+                    // el canvas de abajo es quien los edita al arrastrar los puntos.
                     f.CrMin = f.Min; f.CrMax = f.Max;
                     f.CtMinS = new Slider { Minimum = 0, Maximum = 110, Value = f.CtMin };
                     f.CtMaxS = new Slider { Minimum = 0, Maximum = 110, Value = f.CtMax };
                     f.CrMinS = new Slider { Minimum = f.Min, Maximum = f.Max, Value = f.Min };
                     f.CrMaxS = new Slider { Minimum = f.Min, Maximum = f.Max, Value = f.Max };
-                    f.CtMinV = new TextBlock(); f.CtMaxV = new TextBlock(); f.CrMinV = new TextBlock(); f.CrMaxV = new TextBlock();
-                    cv.Children.Add(CurveSliderRow("Temp min", f.CtMinS, f.CtMinV, " °C"));
-                    cv.Children.Add(CurveSliderRow("Temp max", f.CtMaxS, f.CtMaxV, " °C"));
-                    cv.Children.Add(CurveSliderRow("RPM min",  f.CrMinS, f.CrMinV, " RPM"));
-                    cv.Children.Add(CurveSliderRow("RPM max",  f.CrMaxS, f.CrMaxV, " RPM"));
+                    cv.Children.Add(BuildCurveCanvas(f));
                     f.CurveRow = cv;
                     col.Children.Add(cv);
 
@@ -558,8 +1007,9 @@ namespace RPMac {
                     if (f.CurveApply != null) f.CurveApply.Opacity = 0.45;
                 }
 
-                f.Mode = new TextBlock { Text = "", FontSize = 11, Foreground = SUB, Margin = new Thickness(0, 10, 0, 0) };
-                col.Children.Add(f.Mode);
+                // El modo ya se ve en el control segmentado; el TextBlock se conserva (SetMode
+                // lo escribe) pero fuera del árbol visual para no repetir información.
+                f.Mode = new TextBlock { Text = "", FontSize = 11, Foreground = SUB };
 
                 SetMode(f, fi.Forced ? "manual" : "auto");
                 fans.Add(f);
@@ -576,29 +1026,186 @@ namespace RPMac {
             return row;
         }
 
-        void BuildTempsCard(Panel parent) {
-            var col = new StackPanel();
-            col.Children.Add(new TextBlock { Text = "Temperatures", FontSize = 15, FontWeight = FontWeights.Bold, Foreground = TXT, Margin = new Thickness(0, 0, 0, 10) });
+        // Nombre legible de un sensor curado (para la barra de estado)
+        static string CuratedName(string key) {
+            foreach (var c in CURATED) if (c[0] == key) return c[1];
+            return key;
+        }
 
-            int shown = 0;
+        // Sección a la que pertenece un sensor curado (para los subtítulos de la tarjeta)
+        static string TempGroup(string key) {
+            if (key == "TCGC") return "GPU";                 // GPU vía PECI (empieza por TC)
+            if (key.StartsWith("TC")) return "CPU";
+            if (key.StartsWith("TG")) return "GPU";
+            return "SYSTEM";
+        }
+
+        // Fila de sensor: nombre | clave SMC (monoespaciada, tenue) | valor. Se estira
+        // al ancho de su tarjeta (columnas con proporción fija).
+        UIElement TempRowKeyed(string name, string key) {
+            var g = new Grid { Margin = new Thickness(0, 3.5, 0, 3.5) };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(64) });
+
+            var nm = new TextBlock { Text = name, Foreground = SUB, TextTrimming = TextTrimming.CharacterEllipsis, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center };
+            g.Children.Add(nm);
+            var kk = new TextBlock { Text = key.Trim(), Foreground = SUB, Opacity = 0.5, FontSize = 10, FontFamily = new FontFamily("Consolas"), VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(kk, 1); g.Children.Add(kk);
+            var val = new TextBlock { Text = "—", Foreground = TXT, TextAlignment = TextAlignment.Right, FontWeight = FontWeights.SemiBold, FontSize = 12.5, VerticalAlignment = VerticalAlignment.Center };
+            Grid.SetColumn(val, 2); g.Children.Add(val);
+            curatedLabels[key] = val;
+            return g;
+        }
+
+        // ---- Gráfica de historial (últimos minutos) -------------------------------
+        // Muestra el sensor más caliente y el RPM del primer ventilador. El eje de
+        // temperatura es fijo (20-100 °C) para que la línea no "salte" al reescalar.
+        const int HIST_MAX = 150;                 // 150 muestras x 2 s = 5 minutos
+        const double HIST_H = 142, HIST_TMIN = 20, HIST_TMAX = 100;
+        readonly List<float[]> hist = new List<float[]>();   // [tempC, rpm]
+        Canvas histCv; Polyline histTempLine, histRpmLine;
+        TextBlock histLegendTemp, histLegendRpm;
+        double histRpmMax = 1;
+
+        void BuildHistoryCard(Panel parent) {
+            var col = new StackPanel();
+            col.Children.Add(SectionLabel("Last 5 minutes", 0));
+
+            histCv = new Canvas { Width = CV_W, Height = HIST_H, ClipToBounds = true };
+            for (int i = 1; i <= 3; i++) {   // rejilla horizontal
+                double y = HIST_H * i / 4.0;
+                histCv.Children.Add(new Line { X1 = 0, Y1 = y, X2 = CV_W, Y2 = y, Stroke = BORDER, StrokeThickness = 1, Opacity = 0.6 });
+            }
+            histRpmLine = new Polyline { Stroke = SUB, StrokeThickness = 1.6, Opacity = 0.8, StrokeLineJoin = PenLineJoin.Round };
+            histTempLine = new Polyline { Stroke = ACCENT, StrokeThickness = 2, StrokeLineJoin = PenLineJoin.Round };
+            histCv.Children.Add(histRpmLine);
+            histCv.Children.Add(histTempLine);
+
+            col.Children.Add(new Border {
+                Background = BAR, CornerRadius = new CornerRadius(10), Padding = new Thickness(0, 6, 0, 6),
+                HorizontalAlignment = HorizontalAlignment.Left, Child = histCv
+            });
+
+            var legend = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(2, 8, 0, 0) };
+            legend.Children.Add(new Border { Width = 9, Height = 3, CornerRadius = new CornerRadius(1.5), Background = ACCENT, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+            histLegendTemp = new TextBlock { Text = "Hottest sensor", FontSize = 11.5, Foreground = SUB, VerticalAlignment = VerticalAlignment.Center };
+            legend.Children.Add(histLegendTemp);
+            legend.Children.Add(new Border { Width = 9, Height = 3, CornerRadius = new CornerRadius(1.5), Background = SUB, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(18, 0, 6, 0) });
+            histLegendRpm = new TextBlock { Text = "Fan RPM", FontSize = 11.5, Foreground = SUB, VerticalAlignment = VerticalAlignment.Center };
+            legend.Children.Add(histLegendRpm);
+            col.Children.Add(legend);
+
+            parent.Children.Add(Card(col));
+        }
+
+        void PushHistory(double temp, double rpm, double rpmMax) {
+            if (histCv == null) return;
+            if (rpmMax > 0) histRpmMax = rpmMax;
+            hist.Add(new[] { (float)temp, (float)rpm });
+            while (hist.Count > HIST_MAX) hist.RemoveAt(0);
+
+            var pt = new PointCollection();
+            var pr = new PointCollection();
+            double step = CV_W / (double)(HIST_MAX - 1);
+            for (int i = 0; i < hist.Count; i++) {
+                // la muestra más nueva queda pegada al borde derecho
+                double x = CV_W - (hist.Count - 1 - i) * step;
+                float t = hist[i][0], r = hist[i][1];
+                if (!float.IsNaN(t)) {
+                    double f = (t - HIST_TMIN) / (HIST_TMAX - HIST_TMIN);
+                    if (f < 0) f = 0; if (f > 1) f = 1;
+                    pt.Add(new Point(x, HIST_H - f * HIST_H));
+                }
+                if (!float.IsNaN(r) && histRpmMax > 0) {
+                    double f = r / histRpmMax;
+                    if (f < 0) f = 0; if (f > 1) f = 1;
+                    pr.Add(new Point(x, HIST_H - f * HIST_H));
+                }
+            }
+            histTempLine.Points = pt;
+            histRpmLine.Points = pr;
+            if (!double.IsNaN(temp)) histLegendTemp.Text = "Hottest sensor  " + FormatTemp(temp);
+            if (!double.IsNaN(rpm)) histLegendRpm.Text = "Fan RPM  " + ((int)rpm);
+        }
+
+        // Panel compacto de la página de ventiladores: nombre + valor, agrupado.
+        // Usa su propio diccionario de etiquetas (summaryLabels) porque la página de
+        // sensores ya registró las suyas en curatedLabels para las mismas claves.
+        readonly Dictionary<string, TextBlock> summaryLabels = new Dictionary<string, TextBlock>();
+
+        void BuildLiveTemps(Panel parent) {
+            var col = new StackPanel();
+            col.Children.Add(SectionLabel("Live temperatures", 0));
+
+            string lastGroup = null; int shown = 0;
             foreach (var c in CURATED) {
                 double v = Smc.ReadTemp(c[0]);
                 if (double.IsNaN(v) || v < 5 || v > 120) continue;
-                col.Children.Add(TempRow(c[1], c[0], curatedLabels, 404));
+                string g = TempGroup(c[0]);
+                if (g != lastGroup) {
+                    col.Children.Add(new TextBlock { Text = g, FontSize = 9.5, Foreground = SUB, Opacity = 0.65, Margin = new Thickness(0, shown == 0 ? 2 : 9, 0, 3) });
+                    lastGroup = g;
+                }
+                var g2 = new Grid { Margin = new Thickness(0, 2.5, 0, 2.5) };
+                g2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                g2.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(62) });
+                g2.Children.Add(new TextBlock { Text = c[1], Foreground = SUB, FontSize = 12, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center });
+                var val = new TextBlock { Text = "—", Foreground = TXT, FontSize = 12, FontWeight = FontWeights.SemiBold, TextAlignment = TextAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
+                Grid.SetColumn(val, 1); g2.Children.Add(val);
+                summaryLabels[c[0]] = val;
+                col.Children.Add(g2);
                 shown++;
             }
-            if (shown == 0) col.Children.Add(new TextBlock { Text = "No known sensors detected.", Foreground = SUB });
+            if (shown == 0) col.Children.Add(new TextBlock { Text = "No sensors detected.", Foreground = SUB, FontSize = 12 });
 
+            var card = Card(col);
+            card.Margin = new Thickness(4, 6, 0, 10);
+            card.VerticalAlignment = VerticalAlignment.Top;
+            parent.Children.Add(card);
+        }
+
+        // Página de sensores: una tarjeta por grupo (CPU / GPU / SYSTEM) en columnas.
+        void BuildTempsPane(Panel parent) {
+            var groups = new[] { "CPU", "GPU", "SYSTEM" };
+            var row = new Grid();
+            for (int i = 0; i < groups.Length; i++)
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+            int total = 0;
+            for (int i = 0; i < groups.Length; i++) {
+                var col = new StackPanel();
+                col.Children.Add(SectionLabel(groups[i], 0));
+                int shown = 0;
+                foreach (var c in CURATED) {
+                    if (TempGroup(c[0]) != groups[i]) continue;
+                    double v = Smc.ReadTemp(c[0]);
+                    if (double.IsNaN(v) || v < 5 || v > 120) continue;
+                    col.Children.Add(TempRowKeyed(c[1], c[0]));
+                    shown++;
+                }
+                if (shown == 0) col.Children.Add(new TextBlock { Text = "None detected", Foreground = SUB, Opacity = 0.6, FontSize = 12 });
+                total += shown;
+                var card = Card(col);
+                card.Margin = new Thickness(i == 0 ? 0 : 5, 0, i == groups.Length - 1 ? 0 : 5, 10);
+                card.VerticalAlignment = VerticalAlignment.Top;
+                Grid.SetColumn(card, i);
+                row.Children.Add(card);
+            }
+            parent.Children.Add(row);
+            if (total == 0) parent.Children.Add(Card(new TextBlock { Text = "No known sensors detected on this Mac.", Foreground = SUB, TextWrapping = TextWrapping.Wrap }));
+
+            // Lista cruda (todas las claves T* que responden), bajo demanda
+            var rawCol = new StackPanel();
+            rawCol.Children.Add(SectionLabel("All sensors (raw)", 0));
+            rawCol.Children.Add(new TextBlock { Text = "Every temperature key the SMC reports, including ones RPMac can't name.", Foreground = SUB, FontSize = 11.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10) });
             var toggle = Chip("Show all sensors (raw)", CHIP, TXT, delegate { ToggleAll(); });
-            toggle.Margin = new Thickness(0, 14, 0, 0);
             toggle.HorizontalAlignment = HorizontalAlignment.Left;
-            col.Children.Add(toggle);
-
+            rawCol.Children.Add(toggle);
             allPanel = new WrapPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0) };
             allContainer = new Border { Child = allPanel, Visibility = Visibility.Collapsed };
-            col.Children.Add(allContainer);
-
-            parent.Children.Add(Card(col));
+            rawCol.Children.Add(allContainer);
+            parent.Children.Add(Card(rawCol));
         }
 
         void ToggleAll() {
@@ -618,8 +1225,8 @@ namespace RPMac {
         }
 
         Border BuildToggle(bool initial, Action<bool> onChange) {
-            var track = new Border { Width = 48, Height = 28, CornerRadius = new CornerRadius(14), Background = initial ? ACCENT : CHIP, Cursor = Cursors.Hand, VerticalAlignment = VerticalAlignment.Center };
-            var knob = new Border { Width = 22, Height = 22, CornerRadius = new CornerRadius(11), Background = Brushes.White, HorizontalAlignment = initial ? HorizontalAlignment.Right : HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(3, 0, 3, 0) };
+            var track = new Border { Width = 40, Height = 22, CornerRadius = new CornerRadius(11), Background = initial ? ACCENT : CHIP, BorderBrush = BORDER, BorderThickness = new Thickness(1), Cursor = Cursors.Hand, VerticalAlignment = VerticalAlignment.Center };
+            var knob = new Border { Width = 16, Height = 16, CornerRadius = new CornerRadius(8), Background = Brushes.White, HorizontalAlignment = initial ? HorizontalAlignment.Right : HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(2, 0, 2, 0) };
             track.Child = knob;
             bool state = initial;
             track.MouseLeftButtonUp += delegate {
@@ -896,6 +1503,13 @@ namespace RPMac {
             System.Windows.Application.Current.Shutdown();
         }
         System.Drawing.Icon MakeIcon() {
+            // Icono real de la app (recurso win32 del propio .exe). Si por lo que sea no
+            // se puede extraer, se cae al círculo dibujado de siempre.
+            try {
+                string exe = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                var appIco = System.Drawing.Icon.ExtractAssociatedIcon(exe);
+                if (appIco != null) { staticIconHandle = IntPtr.Zero; return appIco; }
+            } catch { }
             try {
                 using (var bmp = new System.Drawing.Bitmap(32, 32)) {
                     using (var g = System.Drawing.Graphics.FromImage(bmp)) {
@@ -1210,7 +1824,7 @@ namespace RPMac {
             if (presetChips == null) return;
             presetChips.Children.Clear();
             if (Settings.Presets.Count == 0) {
-                presetChips.Children.Add(new TextBlock { Text = "No profiles yet. Set up your fans below and save one.", Foreground = SUB, FontSize = 12, Margin = new Thickness(2, 2, 0, 10), FontStyle = FontStyles.Italic });
+                presetChips.Children.Add(new TextBlock { Text = "No profiles yet. Set your fans up on the Fans page, then save the setup here.", Foreground = SUB, FontSize = 12, Margin = new Thickness(2, 2, 0, 10), FontStyle = FontStyles.Italic });
                 return;
             }
             foreach (var name in Settings.Presets.Keys) presetChips.Children.Add(PresetRow(name));
@@ -1363,10 +1977,11 @@ namespace RPMac {
                         // CurMode is "curve", so auto/max/manual fans are never affected.
                         if (Smc.WritesAllowed) {
                             foreach (var f in fans) {
-                                if (f.CurMode != "curve" || f.CurveSensorKey == null) continue;
+                                if (f.CurMode != "curve" || f.CurveSensorKey == null) { f.LastCurveTemp = float.NaN; continue; }
                                 double t = (f.CurveSensorKey == HIGHEST_SENSOR)
                                     ? HighestCurated(curated)
                                     : Smc.ReadTemp(f.CurveSensorKey);
+                                f.LastCurveTemp = (float)t;   // para el punto vivo del editor gráfico
                                 if (double.IsNaN(t)) continue;
                                 Smc.SetFanRpm(f.Index, CurveRpm(t, f.CtMin, f.CtMax, f.CrMin, f.CrMax));
                             }
@@ -1383,19 +1998,52 @@ namespace RPMac {
                                     f.BarFill.Width = BAR_W * frac;
                                     f.BarFill.Background = (frac > 0.9) ? RED : ACCENT;
                                 }
-                                f.Info.Text = string.Format("min {0:0} · max {1:0} · target {2:0} · {3}",
-                                    fi.Min, fi.Max, fi.Target, fi.Forced ? "forced" : "auto");
+                                // marca del RPM objetivo sobre la barra
+                                if (f.TargetTick != null && !double.IsNaN(fi.Target) && f.Max > 0) {
+                                    double tf = fi.Target / f.Max;
+                                    if (tf < 0) tf = 0; if (tf > 1) tf = 1;
+                                    f.TargetTick.Margin = new Thickness(BAR_W * tf - 1, 0, 0, 0);
+                                    f.TargetTick.Visibility = Visibility.Visible;
+                                }
+                                // El rango min-max ya está en la cabecera de la tarjeta
+                                f.Info.Text = string.Format("Target {0:0} RPM · {1}",
+                                    fi.Target, fi.Forced ? "controlled by RPMac" : "controlled by the Mac");
+                                UpdateCurveLive(f);
                             }
                             UpdateTemps(curated, curatedLabels);
+                            UpdateTemps(curated, summaryLabels);
                             if (all != null) UpdateTemps(all, allLabels);
                             UpdateOverlay(infos, curated);
                             ApplyTrayMode(curated);
-                            status.Text = "Driver OK · updated " + DateTime.Now.ToString("HH:mm:ss");
+                            statusDot.Background = Smc.WritesAllowed ? GOOD : WARN;
+                            double hot = double.NaN; string hotKey = null;
+                            foreach (var kv in curated)
+                                if (!double.IsNaN(kv.Value) && (hotKey == null || kv.Value > hot)) { hot = kv.Value; hotKey = kv.Key; }
+                            status.Text = "Driver OK · "
+                                + fans.Count + (fans.Count == 1 ? " fan" : " fans")
+                                + " · " + curatedLabels.Count + " sensors"
+                                + (hotKey != null ? " · hottest: " + CuratedName(hotKey) + " " + FormatTemp(hot) : "")
+                                + " · updated " + DateTime.Now.ToString("HH:mm:ss");
+                            PushHistory(hotKey == null ? double.NaN : hot,
+                                        infos.Count > 0 ? infos[0].Actual : double.NaN,
+                                        fans.Count > 0 ? fans[0].Max : 0);
+                            // Lectura viva en la barra de título (visible en todas las páginas)
+                            if (titleTemp != null && hotKey != null) {
+                                string rpmPart = (infos.Count > 0 && !double.IsNaN(infos[0].Actual))
+                                    ? "   ·   " + ((int)infos[0].Actual) + " RPM" : "";
+                                titleTemp.Text = FormatTemp(hot) + rpmPart;
+                                titleTemp.Foreground = TempBrush(hot);
+                            }
                         });
                     } catch { }
                     Thread.Sleep(2000);
                 }
             }) { IsBackground = true }.Start();
+        }
+
+        // Color del valor según el calor: normal → ámbar (>=65°C) → rojo (>=80°C)
+        static Brush TempBrush(double c) {
+            return c >= 80 ? (Brush)RED : (c >= 65 ? (Brush)WARN : (Brush)TXT);
         }
 
         void UpdateTemps(Dictionary<string, double> vals, Dictionary<string, TextBlock> labels) {
@@ -1404,6 +2052,7 @@ namespace RPMac {
                 if (!double.IsNaN(kv.Value) && labels.TryGetValue(kv.Key, out t)) {
                     t.Tag = kv.Value;            // guardamos el valor crudo en °C para poder reformatear
                     t.Text = FormatTemp(kv.Value);
+                    t.Foreground = TempBrush(kv.Value);
                 }
             }
         }
@@ -1419,6 +2068,7 @@ namespace RPMac {
         void ReformatTemps() {
             foreach (var t in curatedLabels.Values) if (t.Tag is double) t.Text = FormatTemp((double)t.Tag);
             foreach (var t in allLabels.Values) if (t.Tag is double) t.Text = FormatTemp((double)t.Tag);
+            foreach (var f in fans) if (f.CurveCv != null) RenderCurve(f);   // ticks/readout de la curva en °C/°F
         }
 
         // ---- Overlay en pantalla (estilo FRAPS, esquina superior derecha) ----

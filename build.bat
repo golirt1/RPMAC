@@ -20,6 +20,7 @@ if not exist "%ROOT%build" mkdir "%ROOT%build"
 echo Compiling RPMac...
 "%FW%\csc.exe" /noconfig /nologo /target:winexe /platform:x86 ^
   /win32manifest:"%ROOT%src\gui\app.manifest" ^
+  /win32icon:"%ROOT%resources\RPMac.ico" ^
   /out:"%ROOT%build\RPMac.exe" ^
   /reference:"%FW%\System.dll" ^
   /reference:"%FW%\System.Core.dll" ^
