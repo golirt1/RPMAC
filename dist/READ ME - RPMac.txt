@@ -27,14 +27,25 @@ Requirements
 - An Intel Mac running Windows (Boot Camp).
 - On non-Apple PCs the app stays READ-ONLY and changes nothing.
 
-Antivirus note
---------------
-RPMac uses InpOut32, a low-level I/O driver, to talk to the Mac's SMC
-(the chip that controls the fans). Some antivirus tools flag this kind of
-driver as "potentially unwanted" because it grants hardware access.
-This is normal for fan-control utilities. RPMac is fully open source:
+If Windows blocks it
+--------------------
+RPMac is a small open-source app and is not code-signed (a certificate costs
+a few hundred dollars a year), so Windows does not recognise it yet.
+
+- SmartScreen ("Windows protected your PC")
+    -> click "More info", then "Run anyway".
+- Smart App Control ("An Application Control policy has blocked this file")
+    -> the app silently refuses to start. Either turn Smart App Control off in
+       Windows Security > App & browser control, or build RPMac yourself from
+       the source (instructions in the repository README).
+- Antivirus: RPMac uses InpOut32, a low-level I/O driver, to talk to the Mac's
+  SMC (the chip that controls the fans). Some antivirus tools flag this kind of
+  driver as "potentially unwanted" because it grants hardware access. This is
+  normal for fan-control utilities; allow it manually if it gets blocked.
+
+None of this means something is wrong with the app - it is what happens to any
+unsigned utility that talks to hardware. Everything RPMac does is public:
 https://github.com/golirt1/RPMAC
-If your antivirus blocks it, allow it manually.
 
 Safety
 ------

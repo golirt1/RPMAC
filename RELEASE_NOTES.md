@@ -15,6 +15,8 @@ A full redesign of the interface, and the curve editor RPMac always should have 
 Download `RPMac-v1.5.0-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
 Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` together in the same folder.
 
+> **If Windows blocks it:** RPMac isn't code-signed, so Windows doesn't recognise it yet. On **SmartScreen** choose *More info → Run anyway*; if **Smart App Control** blocks it the app just won't start, so either turn Smart App Control off or build RPMac yourself from source. This is normal for any unsigned utility that talks to hardware — the full source is in the repo.
+
 ---
 
 ## RPMac v1.4.1

@@ -75,7 +75,12 @@ No installer needed — it's a portable app.
 3. **Right-click `RPMac.exe` → "Run as administrator"** (administrator rights are required to access the Mac's hardware/SMC).
 4. Set each fan to **Auto / Max / a custom RPM**. Temperatures update live.
 
-> **Antivirus note:** RPMac bundles **InpOut32**, a low-level I/O driver needed to talk to the SMC. Some antivirus tools flag this kind of driver as "potentially unwanted" because it grants hardware access — this is normal for fan-control utilities. The full source is in this repo; allow it if your AV blocks it.
+> **If Windows blocks it:** RPMac is a small open-source app and isn't code-signed (a certificate costs a few hundred dollars a year), so Windows doesn't recognise it yet.
+> - **SmartScreen** ("Windows protected your PC") → **More info → Run anyway**.
+> - **Smart App Control** ("An Application Control policy has blocked this file") → it silently refuses to start. Either turn Smart App Control off in *Windows Security → App & browser control*, or build RPMac yourself from source (see [Build](#build)).
+> - **Antivirus:** RPMac bundles **InpOut32**, a low-level I/O driver needed to talk to the SMC. Some antivirus tools flag this kind of driver as "potentially unwanted" because it grants hardware access — this is normal for fan-control utilities. The full source is in this repo; allow it if your AV blocks it.
+>
+> None of this is a sign that something is wrong with the app — it's what happens to any unsigned utility that talks to hardware. Everything RPMac does is in this repository, and you can compile it yourself in a few seconds.
 
 To **uninstall**, just delete the folder. Settings live in `%APPDATA%\RPMac`; if you enabled "Start with Windows", turn that toggle off first (or delete the `RPMac` scheduled task).
 
