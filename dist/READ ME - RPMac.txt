@@ -5,13 +5,26 @@ RPMac - Quick start
 2. Right-click RPMac.exe  ->  "Run as administrator"
    (administrator rights are required to access the Mac's hardware/SMC).
 3. Set each fan to Auto / Max / a custom RPM, or use "Curve" to ramp the fan
-   with temperature: drag the two points on the graph to shape the curve, and
-   the live dot shows where the fan is running on it. Pick a sensor, or leave
-   "Highest temp" so the fan follows whichever component is hottest.
+   with temperature:
+     - drag a point to move it
+     - double-click the graph to add a point
+     - right-click a point to remove it
+   The red dot shows where the fan is running on the curve right now. Pick a
+   sensor, or leave "Highest temp" so the fan follows whichever component is
+   hottest.
    Tip: save your setup as a named preset and switch profiles with one click
    (also from the tray icon: right-click -> Presets).
 
 The sidebar has four pages: Fans, Sensors, Presets and Settings.
+
+Worth turning on in Settings
+----------------------------
+- "Smooth fan changes" (on by default) stops the fan hunting up and down when
+  the temperature wobbles by a degree.
+- "Emergency cooling" sends every fan to maximum if any sensor reaches the
+  temperature you pick, whatever mode the fans are in.
+- "Record to a CSV file" appends every reading to history.csv, so you can look
+  back at what ran hot during a game or a long render.
 
 Scripting (optional)
 --------------------

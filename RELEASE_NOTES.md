@@ -1,3 +1,22 @@
+## RPMac v1.6.0
+
+**The other app capable of controlling fans on Intel Macs in Windows — for free.**
+
+### What's new in 1.6.0
+- **Curves with as many points as you want.** A curve is no longer a single straight ramp: **double-click the graph to add a point**, drag it anywhere, and **right-click a point to remove it**. That's what it takes to say "stay silent up to 55°, then ramp hard" — one straight line can't. Changes to an active curve apply immediately, without pressing Apply again.
+- **Smooth fan changes** (on by default). Temperatures wobble by a degree constantly, and a curve that follows every wobble makes the fan audibly hunt up and down. RPMac now ignores tiny changes, rises quickly when something really heats up, and eases back down slowly. Turn it off in Settings if you want the raw curve.
+- **Emergency cooling.** Set a temperature — if *any* sensor reaches it, every fan goes to maximum until the machine cools down, whatever mode each fan is in. A safety net so you can run a quiet curve without worrying.
+- **Copy a curve to all fans.** On Macs with several fans, set one up and hand the same shape to the rest — the RPM values are rescaled to each fan's own range.
+- **Record to a CSV file.** Append every reading to `history.csv` so you can look back at what ran hot during a game or a long render.
+
+Existing curves are read as before and converted automatically; nothing is lost when you update.
+
+### Download
+Download `RPMac-v1.6.0-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
+Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` together in the same folder.
+
+---
+
 ## RPMac v1.5.1
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**

@@ -4,6 +4,7 @@
 using System;
 using System.Drawing.Drawing2D;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -36,7 +37,7 @@ namespace RPMac {
         internal static readonly SolidColorBrush WARN   = (SolidColorBrush)B("#FFB340"); // ámbar: temperatura alta / read-only
         internal static readonly SolidColorBrush GOOD   = (SolidColorBrush)B("#34C759"); // verde: todo bien
 
-        const string VERSION = "1.5.1";
+        const string VERSION = "1.6.0";
 
         static void SetC(SolidColorBrush b, string hex) { b.Color = (Color)ColorConverter.ConvertFromString(hex); }
         static bool IsDark(string t) { return t != "light" && t != "japan"; }
@@ -219,6 +220,12 @@ namespace RPMac {
   </Style>
 </ResourceDictionary>";
 
+        // Un punto de la curva: temperatura (°C) -> velocidad (RPM)
+        class CurvePt {
+            public double T, R;
+            public CurvePt(double t, double r) { T = t; R = r; }
+        }
+
         class FanUi {
             public int Index;
             public double Max;
@@ -236,24 +243,35 @@ namespace RPMac {
             // Temperature-curve controls + cached values. The cached values are what the
             // refresh loop reads (UI controls are only touched on the UI thread).
             public Border CurveBtn, CurveApply;
-            public UIElement CurveRow;
+            public UIElement CurveRow, CurveApplyRow;
             public ComboBox CurveSensor;
-            // Los 4 sliders siguen siendo la "fuente de la verdad" de la curva (Apply y los
-            // presets leen/escriben sus .Value), pero ya no se muestran: el editor gráfico
-            // (canvas) los manipula al arrastrar y se re-dibuja cuando cambian.
-            public Slider CtMinS, CtMaxS, CrMinS, CrMaxS;
             public string CurveSensorKey;
-            public double CtMin = 40, CtMax = 80, CrMin, CrMax;
+
+            // Curva como lista de puntos (temperatura -> RPM), ordenada por temperatura y
+            // con 2 puntos como mínimo. 'Pts' es el modelo que edita la UI; 'Flat' es una
+            // instantánea plana [t0,r0,t1,r1,...] que lee el hilo de refresco sin bloqueos:
+            // al editar se reemplaza el array entero, así que el lector nunca ve un estado
+            // a medias (una asignación de referencia es atómica).
+            public List<CurvePt> Pts = new List<CurvePt>();
+            public volatile double[] Flat;
+            public void SyncFlat() {
+                Pts.Sort(delegate (CurvePt a, CurvePt b) { return a.T.CompareTo(b.T); });
+                var f = new double[Pts.Count * 2];
+                for (int i = 0; i < Pts.Count; i++) { f[i * 2] = Pts[i].T; f[i * 2 + 1] = Pts[i].R; }
+                Flat = f;
+            }
 
             // Editor gráfico de la curva
             public Canvas CurveCv;
             public Polyline CurveLine;
             public Polygon CurveFill;
-            public Ellipse CurveP1, CurveP2, CurveLive;
+            public Ellipse CurveLive;
+            public List<Ellipse> Thumbs = new List<Ellipse>();
             public TextBlock CurveReadout, CvYMin, CvYMax;
             public TextBlock[] CvTicks;
-            public int CurveDrag;                       // 0 = nada, 1 = punto min, 2 = punto max
+            public int CurveDrag = -1;                  // índice del punto que se arrastra, -1 = ninguno
             public volatile float LastCurveTemp = float.NaN;   // temp actual del sensor de la curva
+            public double LastCurveRpm = double.NaN;    // último RPM aplicado (para el suavizado)
 
             // Marca de RPM objetivo sobre la barra
             public Border TargetTick;
@@ -657,7 +675,7 @@ namespace RPMac {
             if (f.ManualRow != null) f.ManualRow.Visibility = man ? Visibility.Visible : Visibility.Collapsed;
             if (f.Apply != null) f.Apply.Visibility = man ? Visibility.Visible : Visibility.Collapsed;
             if (f.CurveRow != null) f.CurveRow.Visibility = cur ? Visibility.Visible : Visibility.Collapsed;
-            if (f.CurveApply != null) f.CurveApply.Visibility = cur ? Visibility.Visible : Visibility.Collapsed;
+            if (f.CurveApplyRow != null) f.CurveApplyRow.Visibility = cur ? Visibility.Visible : Visibility.Collapsed;
             f.Mode.Text = mode == "auto" ? "Mode: automatic"
                         : mode == "max" ? "Mode: maximum"
                         : mode == "manual" ? "Mode: manual"
@@ -665,12 +683,21 @@ namespace RPMac {
         }
 
         // Linear ramp: rpm_min below t_min, rpm_max above t_max, interpolated between.
-        static double CurveRpm(double temp, double tMin, double tMax, double rMin, double rMax) {
-            if (double.IsNaN(temp)) return rMin;
-            if (tMax <= tMin) return rMin;
-            if (temp <= tMin) return rMin;
-            if (temp >= tMax) return rMax;
-            return rMin + (rMax - rMin) * (temp - tMin) / (tMax - tMin);
+        // RPM que pide la curva a una temperatura dada: interpolación lineal entre los dos
+        // puntos que la rodean, y plano fuera del rango (por debajo del primer punto y por
+        // encima del último). 'p' es la instantánea plana [t0,r0,t1,r1,...].
+        static double CurveRpm(double temp, double[] p) {
+            if (p == null || p.Length < 4) return 0;
+            int n = p.Length / 2;
+            if (double.IsNaN(temp) || temp <= p[0]) return p[1];
+            if (temp >= p[(n - 1) * 2]) return p[(n - 1) * 2 + 1];
+            for (int i = 0; i < n - 1; i++) {
+                double t0 = p[i * 2], r0 = p[i * 2 + 1];
+                double t1 = p[(i + 1) * 2], r1 = p[(i + 1) * 2 + 1];
+                if (temp >= t0 && temp <= t1)
+                    return (t1 <= t0) ? r1 : r0 + (r1 - r0) * (temp - t0) / (t1 - t0);
+            }
+            return p[p.Length - 1];
         }
 
         // Special curve "sensor" that tracks the hottest curated temperature instead of a
@@ -749,11 +776,15 @@ namespace RPMac {
             f.CurveLive = new Ellipse { Width = 9, Height = 9, Fill = RED, Visibility = Visibility.Collapsed, IsHitTestVisible = false };
             f.CurveCv.Children.Add(f.CurveLive);
 
-            // Puntos arrastrables (anillos)
-            f.CurveP1 = MakeThumb(f, 1);
-            f.CurveP2 = MakeThumb(f, 2);
-            f.CurveCv.Children.Add(f.CurveP1);
-            f.CurveCv.Children.Add(f.CurveP2);
+            // Doble clic en el lienzo: añadir un punto donde se hizo clic.
+            f.CurveCv.MouseLeftButtonDown += delegate (object s, MouseButtonEventArgs e) {
+                if (e.ClickCount != 2) return;
+                var p = e.GetPosition(f.CurveCv);
+                double t, r; CvInverse(f, p, out t, out r);
+                f.Pts.Add(new CurvePt(Math.Round(t), Math.Round(r)));
+                f.SyncFlat(); RenderCurve(f); MarkCurveEdited(f);
+                e.Handled = true;
+            };
 
             var frame = new Border {
                 Background = BAR, CornerRadius = new CornerRadius(10),
@@ -763,81 +794,109 @@ namespace RPMac {
             };
             wrap.Children.Add(frame);
 
-            f.CurveReadout = new TextBlock { FontSize = 12, Foreground = SUB, Margin = new Thickness(2, 6, 0, 0) };
+            f.CurveReadout = new TextBlock { FontSize = 12, Foreground = SUB, Margin = new Thickness(2, 6, 0, 0), TextWrapping = TextWrapping.Wrap };
             wrap.Children.Add(f.CurveReadout);
-
-            // Cualquier cambio en los sliders ocultos (arrastre, presets, restore) re-dibuja
-            RoutedPropertyChangedEventHandler<double> onChange = delegate { RenderCurve(f); };
-            f.CtMinS.ValueChanged += onChange; f.CtMaxS.ValueChanged += onChange;
-            f.CrMinS.ValueChanged += onChange; f.CrMaxS.ValueChanged += onChange;
+            wrap.Children.Add(new TextBlock {
+                Text = "Drag a point to move it · double-click the graph to add one · right-click a point to remove it",
+                FontSize = 10.5, Foreground = SUB, Opacity = 0.7, Margin = new Thickness(2, 4, 0, 0), TextWrapping = TextWrapping.Wrap
+            });
 
             RenderCurve(f);
             return wrap;
         }
 
-        Ellipse MakeThumb(FanUi f, int which) {
+        // Posición en el lienzo -> (temperatura, RPM). Inverso de CvX/CvY.
+        void CvInverse(FanUi f, Point p, out double temp, out double rpm) {
+            temp = (p.X - CVL) / (CV_W - CVL - CVR) * CV_TMAX;
+            if (temp < 0) temp = 0; if (temp > CV_TMAX) temp = CV_TMAX;
+            double f01 = ((CV_H - CVB) - p.Y) / (CV_H - CVB - CVT);
+            if (f01 < 0) f01 = 0; if (f01 > 1) f01 = 1;
+            rpm = f.Min + f01 * (f.Max - f.Min);
+        }
+
+        // Un punto arrastrable. El índice se guarda en el Tag porque los puntos se
+        // reordenan al moverlos y hay que releerlo en cada evento.
+        Ellipse MakeThumb(FanUi f) {
             var el = new Ellipse {
-                Width = 16, Height = 16,
+                Width = 15, Height = 15,
                 Fill = CARD, Stroke = ACCENT, StrokeThickness = 3,
-                Cursor = Cursors.Hand,
-                ToolTip = which == 1 ? "Drag: below this temperature the fan runs at this RPM"
-                                     : "Drag: above this temperature the fan runs at this RPM"
+                Cursor = Cursors.SizeAll,
+                ToolTip = "Drag to move · right-click to remove"
             };
             el.MouseLeftButtonDown += delegate (object s, MouseButtonEventArgs e) {
-                f.CurveDrag = which; el.CaptureMouse(); e.Handled = true;
+                if (e.ClickCount == 2) { e.Handled = true; return; }   // no añadir encima de un punto
+                f.CurveDrag = (int)el.Tag; el.CaptureMouse(); e.Handled = true;
             };
             el.MouseLeftButtonUp += delegate (object s, MouseButtonEventArgs e) {
-                if (f.CurveDrag == which) { f.CurveDrag = 0; el.ReleaseMouseCapture(); }
+                if (f.CurveDrag >= 0) { f.CurveDrag = -1; el.ReleaseMouseCapture(); MarkCurveEdited(f); }
             };
             el.MouseMove += delegate (object s, MouseEventArgs e) {
-                if (f.CurveDrag != which) return;
-                DragCurvePoint(f, which, e.GetPosition(f.CurveCv));
+                if (f.CurveDrag < 0 || f.CurveDrag >= f.Pts.Count) return;
+                if (!ReferenceEquals(f.Thumbs[f.CurveDrag], el)) return;
+                double t, r; CvInverse(f, e.GetPosition(f.CurveCv), out t, out r);
+                var pt = f.Pts[f.CurveDrag];
+                pt.T = Math.Round(t); pt.R = Math.Round(r);
+                // reordenar por temperatura y seguir arrastrando el mismo punto
+                f.SyncFlat();
+                f.CurveDrag = f.Pts.IndexOf(pt);
+                RenderCurve(f);
+            };
+            el.MouseRightButtonUp += delegate (object s, MouseButtonEventArgs e) {
+                int i = (int)el.Tag;
+                if (f.Pts.Count <= 2) { status.Text = "A curve needs at least two points."; e.Handled = true; return; }
+                if (i >= 0 && i < f.Pts.Count) {
+                    f.Pts.RemoveAt(i); f.SyncFlat(); RenderCurve(f); MarkCurveEdited(f);
+                }
+                e.Handled = true;
             };
             return el;
         }
 
-        void DragCurvePoint(FanUi f, int which, Point p) {
-            // posición → valores (inverso de CvX/CvY), redondeados a enteros
-            double temp = (p.X - CVL) / (CV_W - CVL - CVR) * CV_TMAX;
-            if (temp < 0) temp = 0; if (temp > CV_TMAX) temp = CV_TMAX;
-            double f01 = ((CV_H - CVB) - p.Y) / (CV_H - CVB - CVT);
-            if (f01 < 0) f01 = 0; if (f01 > 1) f01 = 1;
-            double rpm = f.Min + f01 * (f.Max - f.Min);
-
-            if (which == 1) {
-                if (temp > f.CtMaxS.Value - 2) temp = f.CtMaxS.Value - 2;
-                if (rpm > f.CrMaxS.Value) rpm = f.CrMaxS.Value;
-                f.CtMinS.Value = Math.Round(temp);
-                f.CrMinS.Value = Math.Round(rpm);
-            } else {
-                if (temp < f.CtMinS.Value + 2) temp = f.CtMinS.Value + 2;
-                if (rpm < f.CrMinS.Value) rpm = f.CrMinS.Value;
-                f.CtMaxS.Value = Math.Round(temp);
-                f.CrMaxS.Value = Math.Round(rpm);
-            }
+        // Si la curva ya está activa, aplicar los cambios en cuanto se sueltan (sin
+        // tener que volver a pulsar "Apply curve"); si no, solo se guarda al aplicar.
+        void MarkCurveEdited(FanUi f) {
+            if (f.CurMode == "curve") ApplyCurveFromUi(f, true);
         }
 
-        // Re-dibuja la curva desde los valores actuales de los sliders ocultos.
+        // Re-dibuja la curva y sincroniza el número de puntos arrastrables.
         void RenderCurve(FanUi f) {
             if (f.CurveCv == null) return;
-            double tmin = f.CtMinS.Value, tmax = f.CtMaxS.Value;
-            double rmin = f.CrMinS.Value, rmax = f.CrMaxS.Value;
-            double x1 = CvX(tmin), y1 = CvY(f, rmin);
-            double x2 = CvX(tmax), y2 = CvY(f, rmax);
+            if (f.Pts.Count < 2) return;
+
             double xl = CVL, xr = CV_W - CVR, yb = CV_H - CVB;
-
             var line = new PointCollection();
-            line.Add(new Point(xl, y1)); line.Add(new Point(x1, y1));
-            line.Add(new Point(x2, y2)); line.Add(new Point(xr, y2));
-            f.CurveLine.Points = line;
-
             var fill = new PointCollection();
-            fill.Add(new Point(xl, yb)); fill.Add(new Point(xl, y1)); fill.Add(new Point(x1, y1));
-            fill.Add(new Point(x2, y2)); fill.Add(new Point(xr, y2)); fill.Add(new Point(xr, yb));
+            fill.Add(new Point(xl, yb));
+            line.Add(new Point(xl, CvY(f, f.Pts[0].R)));       // plano antes del primer punto
+            fill.Add(new Point(xl, CvY(f, f.Pts[0].R)));
+            foreach (var pt in f.Pts) {
+                var q = new Point(CvX(pt.T), CvY(f, pt.R));
+                line.Add(q); fill.Add(q);
+            }
+            var last = f.Pts[f.Pts.Count - 1];
+            line.Add(new Point(xr, CvY(f, last.R)));           // plano después del último
+            fill.Add(new Point(xr, CvY(f, last.R)));
+            fill.Add(new Point(xr, yb));
+            f.CurveLine.Points = line;
             f.CurveFill.Points = fill;
 
-            Canvas.SetLeft(f.CurveP1, x1 - 8); Canvas.SetTop(f.CurveP1, y1 - 8);
-            Canvas.SetLeft(f.CurveP2, x2 - 8); Canvas.SetTop(f.CurveP2, y2 - 8);
+            // crear/eliminar anillos hasta igualar el número de puntos
+            while (f.Thumbs.Count < f.Pts.Count) {
+                var el = MakeThumb(f);
+                f.Thumbs.Add(el);
+                f.CurveCv.Children.Add(el);
+            }
+            while (f.Thumbs.Count > f.Pts.Count) {
+                var el = f.Thumbs[f.Thumbs.Count - 1];
+                f.CurveCv.Children.Remove(el);
+                f.Thumbs.RemoveAt(f.Thumbs.Count - 1);
+            }
+            for (int i = 0; i < f.Pts.Count; i++) {
+                var el = f.Thumbs[i];
+                el.Tag = i;
+                Canvas.SetLeft(el, CvX(f.Pts[i].T) - 7.5);
+                Canvas.SetTop(el, CvY(f, f.Pts[i].R) - 7.5);
+            }
 
             // Etiquetas de ticks en °C o °F según la preferencia
             if (f.CvTicks != null) {
@@ -848,8 +907,67 @@ namespace RPMac {
             if (f.CvYMin != null) f.CvYMin.Text = ((int)f.Min).ToString();
             if (f.CvYMax != null) f.CvYMax.Text = ((int)f.Max).ToString();
 
-            f.CurveReadout.Text = string.Format("Below {0} → {1:0} RPM   ·   above {2} → {3:0} RPM",
-                ShortTemp(tmin), rmin, ShortTemp(tmax), rmax);
+            var sb = new StringBuilder();
+            for (int i = 0; i < f.Pts.Count; i++) {
+                if (i > 0) sb.Append("   ·   ");
+                sb.Append(string.Format("{0} → {1:0}", ShortTemp(f.Pts[i].T), f.Pts[i].R));
+            }
+            f.CurveReadout.Text = sb.ToString() + " RPM";
+        }
+
+        bool lastGuardHit = false;
+
+        // ---- Registro a CSV -------------------------------------------------------
+        // Una fila por refresco: hora, RPM de cada ventilador y cada sensor curado.
+        // Sirve para ver qué pasó durante una partida o un render largo.
+        static string LogPath {
+            get {
+                return System.IO.Path.Combine(
+                    System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RPMac"),
+                    "history.csv");
+            }
+        }
+        bool logHeaderWritten;
+        void WriteLogRow(List<FanInfo> infos, Dictionary<string, double> curated) {
+            if (!Settings.LogToFile) { logHeaderWritten = false; return; }
+            try {
+                var keys = new List<string>();
+                foreach (var c in CURATED) if (curated.ContainsKey(c[0])) keys.Add(c[0]);
+
+                var sb = new StringBuilder();
+                if (!logHeaderWritten) {
+                    if (!System.IO.File.Exists(LogPath) || new System.IO.FileInfo(LogPath).Length == 0) {
+                        sb.Append("time");
+                        for (int i = 0; i < infos.Count; i++) sb.Append(",fan").Append(i).Append("_rpm");
+                        foreach (var k in keys) sb.Append(',').Append(k.Trim());
+                        sb.Append("\r\n");
+                    }
+                    logHeaderWritten = true;
+                }
+                sb.Append(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                foreach (var fi in infos) sb.Append(',').Append(double.IsNaN(fi.Actual) ? "" : ((int)fi.Actual).ToString());
+                foreach (var k in keys) {
+                    double v = curated[k];
+                    sb.Append(',').Append(double.IsNaN(v) ? "" : v.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture));
+                }
+                sb.Append("\r\n");
+                System.IO.File.AppendAllText(LogPath, sb.ToString());
+            } catch { }
+        }
+
+        // Suaviza el RPM que se manda al SMC. Sin esto el ventilador persigue cada
+        // oscilación de un grado y se oye subir y bajar todo el rato:
+        //  - ignora diferencias menores que SMOOTH_DEAD RPM,
+        //  - sube rápido (la mitad del camino de golpe) para no quedarse corto si algo
+        //    se calienta de verdad, y baja despacio (una cuarta parte) para que no se
+        //    note el vaivén al enfriar.
+        const double SMOOTH_DEAD = 25;
+        static double Smooth(FanUi f, double want) {
+            double prev = f.LastCurveRpm;
+            if (double.IsNaN(prev)) return want;             // primera vez: sin suavizar
+            double d = want - prev;
+            if (Math.Abs(d) < SMOOTH_DEAD) return prev;      // zona muerta
+            return prev + d * (d > 0 ? 0.5 : 0.25);
         }
 
         // Coloca el punto vivo de la curva (temp actual → RPM que pide la curva).
@@ -857,7 +975,7 @@ namespace RPMac {
             if (f.CurveCv == null || f.CurveLive == null) return;
             float t = f.LastCurveTemp;
             if (f.CurMode != "curve" || float.IsNaN(t)) { f.CurveLive.Visibility = Visibility.Collapsed; return; }
-            double rpm = CurveRpm(t, f.CtMin, f.CtMax, f.CrMin, f.CrMax);
+            double rpm = CurveRpm(t, f.Flat);
             Canvas.SetLeft(f.CurveLive, CvX(t) - 4.5);
             Canvas.SetTop(f.CurveLive, CvY(f, rpm) - 4.5);
             f.CurveLive.Visibility = Visibility.Visible;
@@ -866,21 +984,84 @@ namespace RPMac {
         // Read the curve editor controls, validate, cache the values on the FanUi (so the
         // refresh loop can use them without touching UI), switch the fan to curve mode and
         // persist. The loop then drives the RPM each tick.
-        void ApplyCurveFromUi(FanUi f) {
-            double tmin = f.CtMinS.Value, tmax = f.CtMaxS.Value;
-            double rmin = f.CrMinS.Value, rmax = f.CrMaxS.Value;
-            if (tmax <= tmin) { status.Text = "Curve: max temp must be above min temp."; return; }
-            if (rmax < rmin) { double t = rmin; rmin = rmax; rmax = t; }   // tolerate reversed RPM sliders
+        void ApplyCurveFromUi(FanUi f) { ApplyCurveFromUi(f, false); }
+
+        // 'quiet' = el usuario solo movió un punto de una curva que ya estaba activa:
+        // se guarda y sigue, sin volver a anunciar el modo.
+        void ApplyCurveFromUi(FanUi f, bool quiet) {
+            if (f.Pts.Count < 2) { status.Text = "Curve: needs at least two points."; return; }
             string key = null;
             var item = f.CurveSensor.SelectedItem as ComboBoxItem;
             if (item != null) key = item.Tag as string;
             if (key == null) { status.Text = "Curve: pick a sensor first."; return; }
-            f.CurveSensorKey = key; f.CtMin = tmin; f.CtMax = tmax; f.CrMin = rmin; f.CrMax = rmax;
-            SetMode(f, "curve");
-            Settings.SetFanCurve(f.Index, key, tmin, tmax, rmin, rmax);
+            f.CurveSensorKey = key;
+            f.SyncFlat();
+            if (!quiet) SetMode(f, "curve");
+            Settings.SetFanCurve(f.Index, key, PointsToText(f));
             ClearActivePreset();
-            status.Text = string.Format("Fan {0}: curve on · {1} {2:0}–{3:0}°C → {4:0}–{5:0} RPM",
-                f.Index, (key == HIGHEST_SENSOR ? "highest temp" : key), tmin, tmax, rmin, rmax);
+            status.Text = string.Format("Fan {0}: curve on · {1} · {2} points, {3:0}–{4:0} RPM",
+                f.Index, (key == HIGHEST_SENSOR ? "highest temp" : key), f.Pts.Count,
+                f.Pts[0].R, f.Pts[f.Pts.Count - 1].R);
+        }
+
+        // Copia la curva (y el sensor) de un ventilador a todos los demás. Los puntos se
+        // reescalan al rango de RPM de cada ventilador, porque no todos comparten mínimo
+        // y máximo: copiar 1900 RPM a un ventilador que tope en 1200 no tendría sentido.
+        void CopyCurveToAll(FanUi src) {
+            if (src.Pts.Count < 2) return;
+            var item = src.CurveSensor.SelectedItem as ComboBoxItem;
+            string key = (item == null) ? src.CurveSensorKey : item.Tag as string;
+            if (key == null) return;
+            int n = 0;
+            foreach (var f in fans) {
+                if (ReferenceEquals(f, src) || f.CurveSensor == null) continue;
+                var pts = new List<CurvePt>();
+                foreach (var p in src.Pts) {
+                    double frac = (src.Max > src.Min) ? (p.R - src.Min) / (src.Max - src.Min) : 0;
+                    if (frac < 0) frac = 0; if (frac > 1) frac = 1;
+                    pts.Add(new CurvePt(p.T, Math.Round(f.Min + frac * (f.Max - f.Min))));
+                }
+                f.Pts = pts; f.SyncFlat();
+                foreach (var obj in f.CurveSensor.Items) {
+                    var it = obj as ComboBoxItem;
+                    if (it != null && (it.Tag as string) == key) { f.CurveSensor.SelectedItem = it; break; }
+                }
+                RenderCurve(f);
+                f.CurveSensorKey = key;
+                SetMode(f, "curve");
+                Settings.SetFanCurve(f.Index, key, PointsToText(f));
+                n++;
+            }
+            ApplyCurveFromUi(src);
+            ClearActivePreset();
+            status.Text = string.Format("Curve copied to {0} other fan{1}.", n, n == 1 ? "" : "s");
+        }
+
+        // Curva -> texto para el config: "t0,r0;t1,r1;..."
+        static string PointsToText(FanUi f) {
+            var sb = new StringBuilder();
+            for (int i = 0; i < f.Pts.Count; i++) {
+                if (i > 0) sb.Append(';');
+                sb.Append((int)f.Pts[i].T).Append(',').Append((int)f.Pts[i].R);
+            }
+            return sb.ToString();
+        }
+
+        // Texto -> curva. Devuelve null si no es válido (menos de 2 puntos).
+        static List<CurvePt> PointsFromText(string s) {
+            if (string.IsNullOrEmpty(s)) return null;
+            var list = new List<CurvePt>();
+            foreach (var part in s.Split(';')) {
+                var kv = part.Split(',');
+                if (kv.Length != 2) continue;
+                double t, r;
+                if (!double.TryParse(kv[0], System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out t)) continue;
+                if (!double.TryParse(kv[1], System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out r)) continue;
+                list.Add(new CurvePt(t, r));
+            }
+            if (list.Count < 2) return null;
+            list.Sort(delegate (CurvePt a, CurvePt b) { return a.T.CompareTo(b.T); });
+            return list;
         }
 
         void BuildFans(Panel parent) {
@@ -986,23 +1167,28 @@ namespace RPMac {
                     sensRow.Children.Add(f.CurveSensor);
                     cv.Children.Add(sensRow);
 
-                    // Sliders ocultos: guardan los valores de la curva (Apply y presets los leen);
-                    // el canvas de abajo es quien los edita al arrastrar los puntos.
-                    f.CrMin = f.Min; f.CrMax = f.Max;
-                    f.CtMinS = new Slider { Minimum = 0, Maximum = 110, Value = f.CtMin };
-                    f.CtMaxS = new Slider { Minimum = 0, Maximum = 110, Value = f.CtMax };
-                    f.CrMinS = new Slider { Minimum = f.Min, Maximum = f.Max, Value = f.Min };
-                    f.CrMaxS = new Slider { Minimum = f.Min, Maximum = f.Max, Value = f.Max };
+                    // Curva por defecto: silenciosa hasta 40 °C, a tope a 80 °C.
+                    f.Pts.Add(new CurvePt(40, f.Min));
+                    f.Pts.Add(new CurvePt(80, f.Max));
+                    f.SyncFlat();
                     cv.Children.Add(BuildCurveCanvas(f));
                     f.CurveRow = cv;
                     col.Children.Add(cv);
 
                     var fc = f;
+                    var applyRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 10, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
                     var curveApply = Chip("Apply curve", ACCENT, Brushes.White, delegate { if (!Guard()) return; ApplyCurveFromUi(fc); });
-                    curveApply.Margin = new Thickness(0, 10, 0, 0);
-                    curveApply.HorizontalAlignment = HorizontalAlignment.Left;
                     f.CurveApply = curveApply;
-                    col.Children.Add(curveApply);
+                    applyRow.Children.Add(curveApply);
+                    // Con varios ventiladores, copiar esta curva a todos ahorra repetir el
+                    // trabajo punto por punto en cada uno (Mac Pro con 4-5 ventiladores).
+                    if (Smc.GetFans().Count > 1) {
+                        var toAll = Chip("Copy to all fans", CHIP, TXT, delegate { if (!Guard()) return; CopyCurveToAll(fc); });
+                        toAll.ToolTip = "Give every fan this same curve and sensor";
+                        applyRow.Children.Add(toAll);
+                    }
+                    f.CurveApplyRow = applyRow;
+                    col.Children.Add(applyRow);
                 }
 
                 if (!Smc.WritesAllowed) {
@@ -1332,6 +1518,78 @@ namespace RPMac {
             row3.Children.Add(toggle3);
             row3.Children.Add(labels3);
             col.Children.Add(row3);
+
+            // ---- Smooth fan changes ----
+            var rowSm = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 14, 0, 0) };
+            var labelsSm = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            labelsSm.Children.Add(new TextBlock { Text = "Smooth fan changes", Foreground = TXT, FontSize = 13, FontWeight = FontWeights.SemiBold });
+            labelsSm.Children.Add(new TextBlock { Text = "Ignore tiny temperature wobbles and ease the fan down slowly, so a curve doesn't make it audibly hunt up and down.", Foreground = SUB, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) });
+            var toggleSm = BuildToggle(Settings.Smoothing, delegate (bool on) {
+                Settings.Smoothing = on; Settings.Save();
+                foreach (var fu in fans) fu.LastCurveRpm = double.NaN;   // empezar limpio
+                status.Text = on ? "Smoothing: on" : "Smoothing: off";
+            });
+            DockPanel.SetDock(toggleSm, Dock.Right);
+            rowSm.Children.Add(toggleSm);
+            rowSm.Children.Add(labelsSm);
+            col.Children.Add(rowSm);
+
+            // ---- Thermal safety limit ----
+            var rowG = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 14, 0, 0) };
+            var labelsG = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            labelsG.Children.Add(new TextBlock { Text = "Emergency cooling", Foreground = TXT, FontSize = 13, FontWeight = FontWeights.SemiBold });
+            var guardSub = new TextBlock { Foreground = SUB, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) };
+            labelsG.Children.Add(guardSub);
+            var toggleG = BuildToggle(Settings.SafetyGuard, delegate (bool on) {
+                Settings.SafetyGuard = on; Settings.Save();
+                status.Text = on ? "Emergency cooling: on" : "Emergency cooling: off";
+            });
+            DockPanel.SetDock(toggleG, Dock.Right);
+            rowG.Children.Add(toggleG);
+            rowG.Children.Add(labelsG);
+            col.Children.Add(rowG);
+
+            // umbral de la guardia térmica
+            var guardRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+            var guardSlider = new Slider { Minimum = 60, Maximum = 105, Value = Settings.GuardTemp, Width = 260, VerticalAlignment = VerticalAlignment.Center };
+            Action paintGuard = delegate {
+                guardSub.Text = string.Format("If any sensor reaches {0}, every fan goes to maximum until it cools down — whatever mode it's in.",
+                    ShortTemp(Settings.GuardTemp));
+            };
+            paintGuard();
+            guardSlider.ValueChanged += delegate {
+                Settings.GuardTemp = (int)guardSlider.Value;
+                paintGuard();
+            };
+            guardSlider.PreviewMouseUp += delegate { Settings.Save(); };
+            guardRow.Children.Add(new TextBlock { Text = "Trigger at", Foreground = SUB, FontSize = 12, Width = 70, VerticalAlignment = VerticalAlignment.Center });
+            guardRow.Children.Add(guardSlider);
+            col.Children.Add(guardRow);
+
+            // ---- CSV log ----
+            var rowLog = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 14, 0, 0) };
+            var labelsLog = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            labelsLog.Children.Add(new TextBlock { Text = "Record to a CSV file", Foreground = TXT, FontSize = 13, FontWeight = FontWeights.SemiBold });
+            labelsLog.Children.Add(new TextBlock { Text = "Append every reading to history.csv, so you can look back at what ran hot during a game or a long render.", Foreground = SUB, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) });
+            var toggleLog = BuildToggle(Settings.LogToFile, delegate (bool on) {
+                Settings.LogToFile = on; Settings.Save();
+                status.Text = on ? "Recording to " + LogPath : "Recording stopped";
+            });
+            DockPanel.SetDock(toggleLog, Dock.Right);
+            rowLog.Children.Add(toggleLog);
+            rowLog.Children.Add(labelsLog);
+            col.Children.Add(rowLog);
+
+            var openLog = Chip("Open the folder", CHIP, TXT, delegate {
+                try {
+                    string dir = System.IO.Path.GetDirectoryName(LogPath);
+                    if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);
+                    System.Diagnostics.Process.Start("explorer.exe", "\"" + dir + "\"");
+                } catch (Exception ex) { status.Text = "Couldn't open the folder: " + ex.Message; }
+            });
+            openLog.Margin = new Thickness(0, 10, 0, 0);
+            openLog.HorizontalAlignment = HorizontalAlignment.Left;
+            col.Children.Add(openLog);
 
             // ---- Show in tray (dropdown) ----
             var rowTray = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 14, 0, 0) };
@@ -1752,12 +2010,21 @@ namespace RPMac {
             try {
                 if (mode == "max") { Smc.SetFanMax(f.Index); SetMode(f, "max"); }
                 else if (mode == "manual") { Smc.SetFanRpm(f.Index, rpm); f.Slider.Value = rpm; SetMode(f, "manual"); }
-                else if (mode == "curve" && s.Length >= 7 && f.CurveSensor != null) {
-                    double tmin, tmax, rmin, rmax;
-                    double.TryParse(s[3], out tmin); double.TryParse(s[4], out tmax);
-                    double.TryParse(s[5], out rmin); double.TryParse(s[6], out rmax);
-                    f.CurveSensorKey = s[2]; f.CtMin = tmin; f.CtMax = tmax; f.CrMin = rmin; f.CrMax = rmax;
-                    f.CtMinS.Value = tmin; f.CtMaxS.Value = tmax; f.CrMinS.Value = rmin; f.CrMaxS.Value = rmax;
+                else if (mode == "curve" && s.Length >= 4 && f.CurveSensor != null) {
+                    // Dos formatos: el nuevo lleva los puntos en s[3] ("t,r;t,r;..."), el
+                    // viejo (<= v1.5.x) traía tmin/tmax/rmin/rmax en s[3..6]. Se aceptan
+                    // ambos para no perder la configuración al actualizar.
+                    var pts = PointsFromText(s[3]);
+                    if (pts == null && s.Length >= 7) {
+                        double tmin, tmax, rmin, rmax;
+                        double.TryParse(s[3], out tmin); double.TryParse(s[4], out tmax);
+                        double.TryParse(s[5], out rmin); double.TryParse(s[6], out rmax);
+                        if (tmax > tmin) pts = new List<CurvePt> { new CurvePt(tmin, rmin), new CurvePt(tmax, rmax) };
+                    }
+                    if (pts == null) return;
+                    f.CurveSensorKey = s[2];
+                    f.Pts = pts; f.SyncFlat();
+                    RenderCurve(f);
                     foreach (var obj in f.CurveSensor.Items) {
                         var it = obj as ComboBoxItem;
                         if (it != null && (it.Tag as string) == f.CurveSensorKey) { f.CurveSensor.SelectedItem = it; break; }
@@ -1773,9 +2040,7 @@ namespace RPMac {
             switch (f.CurMode) {
                 case "max":    return new[] { "max", "0" };
                 case "manual": return new[] { "manual", ((int)f.Slider.Value).ToString() };
-                case "curve":  return new[] { "curve", "0", f.CurveSensorKey ?? "",
-                                   ((int)f.CtMin).ToString(), ((int)f.CtMax).ToString(),
-                                   ((int)f.CrMin).ToString(), ((int)f.CrMax).ToString() };
+                case "curve":  return new[] { "curve", "0", f.CurveSensorKey ?? "", PointsToText(f) };
                 default:       return new[] { "auto", "0" };
             }
         }
@@ -1979,17 +2244,32 @@ namespace RPMac {
                         // Drive any fan in curve mode. Runs on this background thread using the
                         // cached curve values (set on the UI thread); only touches fans whose
                         // CurMode is "curve", so auto/max/manual fans are never affected.
-                        if (Smc.WritesAllowed) {
+                        // Red de seguridad térmica: por encima del umbral, todo al máximo.
+                        double hottest = HighestCurated(curated);
+                        bool guardHit = Settings.SafetyGuard && !double.IsNaN(hottest) && hottest >= Settings.GuardTemp;
+                        if (guardHit && Smc.WritesAllowed) {
+                            foreach (var f in fans) Smc.SetFanMax(f.Index);
+                        } else if (Smc.WritesAllowed) {
                             foreach (var f in fans) {
-                                if (f.CurMode != "curve" || f.CurveSensorKey == null) { f.LastCurveTemp = float.NaN; continue; }
+                                if (f.CurMode != "curve" || f.CurveSensorKey == null) {
+                                    f.LastCurveTemp = float.NaN; f.LastCurveRpm = double.NaN; continue;
+                                }
                                 double t = (f.CurveSensorKey == HIGHEST_SENSOR)
-                                    ? HighestCurated(curated)
+                                    ? hottest
                                     : Smc.ReadTemp(f.CurveSensorKey);
                                 f.LastCurveTemp = (float)t;   // para el punto vivo del editor gráfico
                                 if (double.IsNaN(t)) continue;
-                                Smc.SetFanRpm(f.Index, CurveRpm(t, f.CtMin, f.CtMax, f.CrMin, f.CrMax));
+                                double want = CurveRpm(t, f.Flat);
+                                double send = Settings.Smoothing ? Smooth(f, want) : want;
+                                f.LastCurveRpm = send;
+                                Smc.SetFanRpm(f.Index, send);
                             }
                         }
+                        if (guardHit != lastGuardHit) {
+                            lastGuardHit = guardHit;
+                            foreach (var f in fans) { f.LastCurveRpm = double.NaN; }
+                        }
+                        WriteLogRow(infos, curated);
 
                         Dispatcher.Invoke((Action)delegate {
                             foreach (var fi in infos) {
@@ -2259,6 +2539,15 @@ namespace RPMac {
         public static HashSet<string> OverlayItems = null; // null = mostrar todo
         public static string Theme = "dark";
         public static string TrayMode = "icon";  // "icon", "none", "highest", or a sensor key
+        // Suaviza la curva: ignora cambios pequeños y baja despacio, para que el ventilador
+        // no persiga cada oscilación de un grado (que se oye como un subir/bajar constante).
+        public static bool Smoothing = true;
+        // Red de seguridad: por encima de GuardTemp todos los ventiladores van al máximo,
+        // sin importar el modo en el que estén.
+        public static bool SafetyGuard = false;
+        public static int GuardTemp = 90;
+        // Guarda una fila por refresco en %APPDATA%\RPMac\history.csv
+        public static bool LogToFile = false;
 
         public static void Load() {
             try {
@@ -2272,6 +2561,10 @@ namespace RPMac {
                     else if (s.Length >= 2 && s[0] == "ovsel") OverlayItems = new HashSet<string>(s[1].Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries));
                     else if (s.Length >= 2 && s[0] == "theme") Theme = s[1];
                     else if (s.Length >= 2 && s[0] == "traymode") TrayMode = s[1];
+                    else if (s.Length >= 2 && s[0] == "smooth") Smoothing = (s[1] == "1");
+                    else if (s.Length >= 2 && s[0] == "guard") SafetyGuard = (s[1] == "1");
+                    else if (s.Length >= 2 && s[0] == "guardtemp") { int g; if (int.TryParse(s[1], out g) && g >= 60 && g <= 105) GuardTemp = g; }
+                    else if (s.Length >= 2 && s[0] == "logcsv") LogToFile = (s[1] == "1");
                     else if (s.Length >= 4 && s[0] == "fan") {
                         int idx;
                         if (int.TryParse(s[1], out idx)) {
@@ -2307,6 +2600,10 @@ namespace RPMac {
                 if (OverlayItems != null) lines.Add("ovsel|" + string.Join(",", new List<string>(OverlayItems).ToArray()));
                 lines.Add("theme|" + Theme);
                 lines.Add("traymode|" + TrayMode);
+                lines.Add("smooth|" + (Smoothing ? "1" : "0"));
+                lines.Add("guard|" + (SafetyGuard ? "1" : "0"));
+                lines.Add("guardtemp|" + GuardTemp);
+                lines.Add("logcsv|" + (LogToFile ? "1" : "0"));
                 foreach (var kv in Fans) lines.Add("fan|" + kv.Key + "|" + string.Join("|", kv.Value));
                 foreach (var p in Presets)
                     foreach (var kv in p.Value)
@@ -2315,9 +2612,8 @@ namespace RPMac {
             } catch { }
         }
         public static void SetFan(int idx, string mode, int rpm) { Fans[idx] = new string[] { mode, rpm.ToString() }; Save(); }
-        public static void SetFanCurve(int idx, string sensor, double tmin, double tmax, double rmin, double rmax) {
-            Fans[idx] = new string[] { "curve", "0", sensor,
-                ((int)tmin).ToString(), ((int)tmax).ToString(), ((int)rmin).ToString(), ((int)rmax).ToString() };
+        public static void SetFanCurve(int idx, string sensor, string points) {
+            Fans[idx] = new string[] { "curve", "0", sensor, points };
             Save();
         }
     }
