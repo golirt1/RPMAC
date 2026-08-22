@@ -9,29 +9,35 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 ## Screenshots
 
 <p align="center">
-  <img src="docs/screenshots/main.png" alt="RPMac — fan control with a graphical temperature curve" width="820">
+  <img src="docs/screenshots/demo.gif" alt="RPMac in action — dragging the temperature curve and moving between pages" width="820">
 </p>
 <p align="center">
-  <sub><b>Fans</b> — drag the curve points to shape it, watch the live dot ride the curve, and keep an eye on every sensor while you tune.</sub>
+  <sub><b>Drag the curve points</b> to shape it — the red dot shows where the fan is running on it right now.</sub>
 </p>
 
 <table>
   <tr>
     <td align="center" width="50%">
+      <img src="docs/screenshots/main.png" alt="Fan control with the graphical temperature curve" width="410"><br>
+      <sub><b>Fans</b><br>Curve editor, 5-minute history and live temperatures</sub>
+    </td>
+    <td align="center" width="50%">
       <img src="docs/screenshots/sensors.png" alt="All temperature sensors, grouped" width="410"><br>
       <sub><b>Sensors</b><br>Grouped by CPU / GPU / system, with the raw SMC key</sub>
     </td>
+  </tr>
+  <tr>
     <td align="center" width="50%">
       <img src="docs/screenshots/settings.png" alt="Settings, overlay options and themes" width="410"><br>
       <sub><b>Settings</b><br>Start with Windows · °C/°F · tray mode · overlay · themes</sub>
     </td>
+    <td align="center" width="50%">
+      <img src="docs/screenshots/light.png" alt="RPMac in the Light theme" width="410"><br>
+      <sub><b>Four themes</b><br>Dark · Light · Nature · Japan, applied instantly</sub>
+    </td>
   </tr>
 </table>
 
-<p align="center">
-  <img src="docs/screenshots/light.png" alt="RPMac in the Light theme" width="560"><br>
-  <sub>Four themes — <b>Dark</b>, <b>Light</b>, <b>Nature</b> and <b>Japan</b> — applied instantly, window chrome included.</sub>
-</p>
 
 **On-screen overlay** (FRAPS-style, always on top — works over games in borderless/windowed mode):
 
