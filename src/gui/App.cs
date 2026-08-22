@@ -37,7 +37,7 @@ namespace RPMac {
         internal static readonly SolidColorBrush WARN   = (SolidColorBrush)B("#FFB340"); // ámbar: temperatura alta / read-only
         internal static readonly SolidColorBrush GOOD   = (SolidColorBrush)B("#34C759"); // verde: todo bien
 
-        const string VERSION = "1.6.0";
+        const string VERSION = "1.6.1";
 
         static void SetC(SolidColorBrush b, string hex) { b.Color = (Color)ColorConverter.ConvertFromString(hex); }
         static bool IsDark(string t) { return t != "light" && t != "japan"; }
@@ -252,10 +252,12 @@ namespace RPMac {
             // instantánea plana [t0,r0,t1,r1,...] que lee el hilo de refresco sin bloqueos:
             // al editar se reemplaza el array entero, así que el lector nunca ve un estado
             // a medias (una asignación de referencia es atómica).
+            // 'Pts' se mantiene siempre ordenada por temperatura y sin bajadas de RPM:
+            // se inserta en su sitio al añadir y se limita contra los vecinos al arrastrar,
+            // así que aquí solo hay que aplanarla.
             public List<CurvePt> Pts = new List<CurvePt>();
             public volatile double[] Flat;
             public void SyncFlat() {
-                Pts.Sort(delegate (CurvePt a, CurvePt b) { return a.T.CompareTo(b.T); });
                 var f = new double[Pts.Count * 2];
                 for (int i = 0; i < Pts.Count; i++) { f[i * 2] = Pts[i].T; f[i * 2 + 1] = Pts[i].R; }
                 Flat = f;
@@ -779,9 +781,14 @@ namespace RPMac {
             // Doble clic en el lienzo: añadir un punto donde se hizo clic.
             f.CurveCv.MouseLeftButtonDown += delegate (object s, MouseButtonEventArgs e) {
                 if (e.ClickCount != 2) return;
-                var p = e.GetPosition(f.CurveCv);
-                double t, r; CvInverse(f, p, out t, out r);
-                f.Pts.Add(new CurvePt(Math.Round(t), Math.Round(r)));
+                double t, r; CvInverse(f, e.GetPosition(f.CurveCv), out t, out r);
+                // insertar en su sitio por temperatura y ajustarlo a los vecinos, para que
+                // el punto nuevo nunca deje la curva con una bajada
+                int i = 0;
+                while (i < f.Pts.Count && f.Pts[i].T < t) i++;
+                f.Pts.Insert(i, new CurvePt(t, r));
+                ClampToNeighbours(f, i, ref t, ref r);
+                f.Pts[i].T = Math.Round(t); f.Pts[i].R = Math.Round(r);
                 f.SyncFlat(); RenderCurve(f); MarkCurveEdited(f);
                 e.Handled = true;
             };
@@ -814,8 +821,25 @@ namespace RPMac {
             rpm = f.Min + f01 * (f.Max - f.Min);
         }
 
-        // Un punto arrastrable. El índice se guarda en el Tag porque los puntos se
-        // reordenan al moverlos y hay que releerlo en cada evento.
+        // Mantiene un punto dentro de lo que permiten sus vecinos: no puede cruzarlos por
+        // temperatura (se deja un hueco mínimo) ni romper la regla de que a más calor,
+        // más revoluciones. Sin esto se pueden dibujar curvas absurdas — un punto que
+        // adelanta al de al lado deja la curva bajando cuando la máquina se calienta.
+        const double MIN_T_GAP = 3;
+        void ClampToNeighbours(FanUi f, int i, ref double t, ref double r) {
+            double tLo = (i > 0) ? f.Pts[i - 1].T + MIN_T_GAP : 0;
+            double tHi = (i < f.Pts.Count - 1) ? f.Pts[i + 1].T - MIN_T_GAP : CV_TMAX;
+            if (tHi < tLo) tHi = tLo;
+            if (t < tLo) t = tLo; if (t > tHi) t = tHi;
+
+            double rLo = (i > 0) ? f.Pts[i - 1].R : f.Min;
+            double rHi = (i < f.Pts.Count - 1) ? f.Pts[i + 1].R : f.Max;
+            if (rHi < rLo) rHi = rLo;
+            if (r < rLo) r = rLo; if (r > rHi) r = rHi;
+        }
+
+        // Un punto arrastrable. El índice se guarda en el Tag y se mantiene válido porque
+        // el orden de la lista nunca cambia (los puntos no pueden cruzarse).
         Ellipse MakeThumb(FanUi f) {
             var el = new Ellipse {
                 Width = 15, Height = 15,
@@ -834,11 +858,10 @@ namespace RPMac {
                 if (f.CurveDrag < 0 || f.CurveDrag >= f.Pts.Count) return;
                 if (!ReferenceEquals(f.Thumbs[f.CurveDrag], el)) return;
                 double t, r; CvInverse(f, e.GetPosition(f.CurveCv), out t, out r);
+                ClampToNeighbours(f, f.CurveDrag, ref t, ref r);
                 var pt = f.Pts[f.CurveDrag];
                 pt.T = Math.Round(t); pt.R = Math.Round(r);
-                // reordenar por temperatura y seguir arrastrando el mismo punto
                 f.SyncFlat();
-                f.CurveDrag = f.Pts.IndexOf(pt);
                 RenderCurve(f);
             };
             el.MouseRightButtonUp += delegate (object s, MouseButtonEventArgs e) {
@@ -1061,6 +1084,13 @@ namespace RPMac {
             }
             if (list.Count < 2) return null;
             list.Sort(delegate (CurvePt a, CurvePt b) { return a.T.CompareTo(b.T); });
+            // Sanear lo que venga del archivo: separar puntos pegados y quitar bajadas de
+            // RPM. Una curva guardada por una versión anterior (o editada a mano) podía
+            // tener un tramo descendente, que no tiene sentido para refrigerar.
+            for (int i = 1; i < list.Count; i++) {
+                if (list[i].T < list[i - 1].T + MIN_T_GAP) list[i].T = list[i - 1].T + MIN_T_GAP;
+                if (list[i].R < list[i - 1].R) list[i].R = list[i - 1].R;
+            }
             return list;
         }
 

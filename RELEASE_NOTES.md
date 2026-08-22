@@ -1,3 +1,16 @@
+## RPMac v1.6.1
+
+**The other app capable of controlling fans on Intel Macs in Windows — for free.**
+
+### Fixed in 1.6.1
+- **Curve points can no longer cross each other.** Dragging a point past its neighbour left the curve going *down* as the temperature went *up* (e.g. `38°C → 860 RPM` sitting next to `40°C → 790 RPM`), which is never what you want from a fan and looked broken. Points now keep their order, stay at least 3°C apart, and can't be dragged below the point on their left or above the one on their right. Curves saved with a dip are straightened out when they're loaded.
+
+### Download
+Download `RPMac-v1.6.1-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
+Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` together in the same folder.
+
+---
+
 ## RPMac v1.6.0
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**
