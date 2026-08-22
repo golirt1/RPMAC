@@ -12,7 +12,7 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
   <img src="docs/screenshots/demo.gif" alt="RPMac in action — dragging the temperature curve and moving between pages" width="820">
 </p>
 <p align="center">
-  <sub><b>Drag the curve points</b> to shape it — the red dot shows where the fan is running on it right now.</sub>
+  <sub><b>Max</b>, then <b>Curve</b> — drag the points to shape it, and the red dot shows where the fan is running on the curve right now.</sub>
 </p>
 
 <table>
