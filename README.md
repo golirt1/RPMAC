@@ -65,6 +65,7 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 - **5-minute history graph** of temperature and fan speed, plus optional **CSV recording** of every reading
 - **Presets** — save your fan setup as named profiles (e.g. Silent, Gaming) and switch with one click, from the app or the tray icon
 - All sensors grouped by CPU / GPU / system, with their raw SMC keys (plus a full raw view)
+- **Name your own sensors** — if your Mac exposes a sensor RPMac doesn't know, give it a name and it becomes usable everywhere: curves, "Highest temp", overlay, tray and CSV
 - On-screen overlay (FRAPS-style): always-on-top, top-right corner, vertical or horizontal, with selectable fans/sensors
 - Live temperature on the tray icon (highest sensor or a specific one) — or just the app icon, or nothing
 - Themes: Dark / Light / Nature / Japan
@@ -79,7 +80,7 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 ## Install
 No installer needed — it's a portable app.
 
-1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.6.1-windows.zip` (under **Assets**).
+1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.7.0-windows.zip` (under **Assets**).
 2. **Unzip it** to any folder you like (e.g. your Desktop). Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` **together in the same folder**.
 3. **Right-click `RPMac.exe` → "Run as administrator"** (administrator rights are required to access the Mac's hardware/SMC).
 4. Set each fan to **Auto / Max / a custom RPM**. Temperatures update live.
@@ -102,7 +103,7 @@ To **uninstall**, just delete the folder. Settings live in `%APPDATA%\RPMac`; if
 | Non-Apple PCs | Read-only (writes are blocked) |
 
 ### Tested hardware
-RPMac has been verified on **three machines**:
+RPMac has been verified on **four machines**:
 
 - **Mac Pro (Late 2013)** — model identifier `MacPro6,1`
   - Intel Xeon CPU, dual AMD FirePro GPUs, single centrifugal system fan
@@ -112,8 +113,11 @@ RPMac has been verified on **three machines**:
 - **iMac (Retina 5K, 27-inch, Late 2015)** — model identifier `iMac17,1`
   - Intel Core i5-6500, AMD Radeon R9 M380, Windows 10 (Boot Camp)
   - Fan control (Auto / Max / Manual / Curve) and temperature sensors both work; reported by a user (thanks @Bibihi98)
+- **Mac mini (Early 2009)** — model identifier `Macmini3,1`
+  - Intel Core 2 Duo, NVIDIA GeForce 9400, single fan — running **Windows 7 Pro SP1**
+  - Manual RPM and temperatures both work; the oldest confirmed machine and the oldest confirmed Windows. Reported by @Mac-Apex
 
-On all three machines, reading sensors and controlling the fans (Auto / Max / custom RPM) work correctly.
+On all four machines, reading sensors and controlling the fans (Auto / Max / custom RPM) work correctly.
 
 ### Other Intel Macs (untested, but expected to work)
 Beyond the two Mac Pros above, RPMac has **not** been tested on other Mac models yet. That said, it is built on the **standard Apple SMC interface that is common to virtually all Intel Macs**, and the core auto-detects the number of fans and each key's data format. So it *should* work on most Intel Macs in Boot Camp, with these caveats:

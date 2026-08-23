@@ -1,3 +1,18 @@
+## RPMac v1.7.0
+
+**The other app capable of controlling fans on Intel Macs in Windows — for free.**
+
+### What's new in 1.7.0
+- **Name your own sensors.** Some Macs expose temperature sensors RPMac has no name for — until now they only showed up in the raw list and couldn't be used for anything. On the **Sensors** page you can now give any of them a name, and it becomes a normal sensor straight away: usable in curves and "Highest temp", and available in the overlay, the tray icon and the CSV. No restart needed. Suggested by @Mac-Apex.
+- **Northbridge sensors added.** `TN0D` and `TN0P` are now recognised alongside `TN0H`. On Mac minis and MacBooks with the NVIDIA MCP79 chipset this is often the hottest part of the machine, so leaving it out meant "Highest temp" could miss the real hot spot. Reported by @Mac-Apex.
+- **A clearer message on T2 Macs.** RPMac used to tell T2 owners that `AppleT2Smc.bin` was missing, which sent people looking for a file that isn't published yet. It now says plainly that T2 support is written but waiting on its kernel module being signed.
+
+### Download
+Download `RPMac-v1.7.0-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
+Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` together in the same folder.
+
+---
+
 ## RPMac v1.6.1
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**

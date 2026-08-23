@@ -1,4 +1,4 @@
-// RPMac - GUI (WPF, codigo puro, tema oscuro moderno)
+﻿// RPMac - GUI (WPF, codigo puro, tema oscuro moderno)
 // Copyright (C) 2026 golirt1 - GPL-2.0-only. Ver LICENSE y NOTICE.
 
 using System;
@@ -37,7 +37,7 @@ namespace RPMac {
         internal static readonly SolidColorBrush WARN   = (SolidColorBrush)B("#FFB340"); // ámbar: temperatura alta / read-only
         internal static readonly SolidColorBrush GOOD   = (SolidColorBrush)B("#34C759"); // verde: todo bien
 
-        const string VERSION = "1.6.1";
+        const string VERSION = "1.7.0";
 
         static void SetC(SolidColorBrush b, string hex) { b.Color = (Color)ColorConverter.ConvertFromString(hex); }
         static bool IsDark(string t) { return t != "light" && t != "japan"; }
@@ -119,11 +119,33 @@ namespace RPMac {
             new string[]{"TA1P","Ambient 2"},
             new string[]{"TPCD","Power (PCH)"},
             new string[]{"TH0P","Hard drive"},
-            new string[]{"TN0H","Northbridge"},
+            // Northbridge / chipset. En los Mac mini y MacBook con chipset NVIDIA (MCP79)
+            // este suele ser el punto MÁS caliente de la máquina, así que tiene que estar
+            // aquí o no cuenta para "Highest temp" ni se puede usar en una curva.
+            new string[]{"TN0D","Northbridge (die)"},
+            new string[]{"TN0P","Northbridge (proximity)"},
+            new string[]{"TN0H","Northbridge (heatsink)"},
             new string[]{"TI0P","Thunderbolt"},
             new string[]{"TB0T","Battery"},
             new string[]{"TW0P","Wi-Fi"},
         };
+
+        // Lista efectiva de sensores = los conocidos (CURATED) + los que el usuario haya
+        // nombrado a mano. Las Macs raras exponen claves que no están en la lista de
+        // arriba, y sin nombre no se podían usar para nada: solo se veían en la vista
+        // cruda. Nombrar una la asciende a sensor de pleno derecho (curvas, "Highest
+        // temp", overlay, bandeja, CSV). Se recalcula al añadir o quitar una.
+        static string[][] SENSORS = CURATED;
+
+        static void RebuildSensorList() {
+            var list = new List<string[]>(CURATED);
+            foreach (var kv in Settings.CustomSensors) {
+                bool known = false;
+                foreach (var c in SENSORS) if (c[0] == kv.Key) { known = true; break; }
+                if (!known) list.Add(new[] { kv.Key, kv.Value });
+            }
+            SENSORS = list.ToArray();
+        }
 
         // Estilos modernos (slider + scrollbar) cargados por XAML
         const string STYLES =
@@ -352,6 +374,7 @@ namespace RPMac {
             // deliberately kept separate from the mutable BG/CARD/TXT/... brushes used directly in code.
             try { Resources.MergedDictionaries.Add((ResourceDictionary)XamlReader.Parse(STYLES)); } catch { }
             Settings.Load();
+            RebuildSensorList();   // a�ade a la lista los sensores que el usuario haya nombrado
             ApplyTheme(Settings.Theme); // colorea la paleta (y crea los recursos de tema) antes de construir la UI
 
             // barra de titulo acorde al tema
@@ -419,9 +442,11 @@ namespace RPMac {
 
             BuildFans(stack);
             BuildHistoryCard(stack);
+            liveTempsHost = liveCol;
             BuildLiveTemps(liveCol);
 
-            BuildTempsPane(NewPage("sensors"));
+            sensorsPage = NewPage("sensors");
+            BuildTempsPane(sensorsPage);
             BuildPresetsCard(NewPage("profiles"));
             BuildSettingsCard(NewPage("settings"));
             ShowPage("fans");
@@ -955,7 +980,7 @@ namespace RPMac {
             if (!Settings.LogToFile) { logHeaderWritten = false; return; }
             try {
                 var keys = new List<string>();
-                foreach (var c in CURATED) if (curated.ContainsKey(c[0])) keys.Add(c[0]);
+                foreach (var c in SENSORS) if (curated.ContainsKey(c[0])) keys.Add(c[0]);
 
                 var sb = new StringBuilder();
                 if (!logHeaderWritten) {
@@ -1098,7 +1123,7 @@ namespace RPMac {
             // Sensors offered in the curve dropdown: curated keys present with a plausible
             // reading (same criterion as the Temperatures card).
             var availSensors = new List<string[]>();
-            foreach (var c in CURATED) {
+            foreach (var c in SENSORS) {
                 double v = Smc.ReadTemp(c[0]);
                 if (!double.IsNaN(v) && v >= 5 && v <= 120) availSensors.Add(new[] { c[0], c[1] });
             }
@@ -1248,7 +1273,7 @@ namespace RPMac {
 
         // Nombre legible de un sensor curado (para la barra de estado)
         static string CuratedName(string key) {
-            foreach (var c in CURATED) if (c[0] == key) return c[1];
+            foreach (var c in SENSORS) if (c[0] == key) return c[1];
             return key;
         }
 
@@ -1359,7 +1384,7 @@ namespace RPMac {
             col.Children.Add(SectionLabel("Live temperatures", 0));
 
             string lastGroup = null; int shown = 0;
-            foreach (var c in CURATED) {
+            foreach (var c in SENSORS) {
                 double v = Smc.ReadTemp(c[0]);
                 if (double.IsNaN(v) || v < 5 || v > 120) continue;
                 string g = TempGroup(c[0]);
@@ -1397,7 +1422,7 @@ namespace RPMac {
                 var col = new StackPanel();
                 col.Children.Add(SectionLabel(groups[i], 0));
                 int shown = 0;
-                foreach (var c in CURATED) {
+                foreach (var c in SENSORS) {
                     if (TempGroup(c[0]) != groups[i]) continue;
                     double v = Smc.ReadTemp(c[0]);
                     if (double.IsNaN(v) || v < 5 || v > 120) continue;
@@ -1426,22 +1451,181 @@ namespace RPMac {
             allContainer = new Border { Child = allPanel, Visibility = Visibility.Collapsed };
             rawCol.Children.Add(allContainer);
             parent.Children.Add(Card(rawCol));
+
+            BuildCustomSensorCard(parent);
+        }
+
+        ComboBox customKeyCombo;
+        TextBox customNameBox;
+        StackPanel customList;
+        StackPanel sensorsPage;     // contenedor de la p�gina de sensores (para rehacerla)
+        Panel liveTempsHost;        // contenedor del panel de temperaturas de la p�gina de fans
+
+        // "Name a sensor of your own": asciende una clave cruda a sensor con nombre, para
+        // poder usarla en curvas, "Highest temp", overlay, bandeja y CSV.
+        void BuildCustomSensorCard(Panel parent) {
+            var col = new StackPanel();
+            col.Children.Add(SectionLabel("Name a sensor of your own", 0));
+            col.Children.Add(new TextBlock {
+                Text = "Some Macs expose sensors RPMac doesn't have a name for. Give one a name and it becomes a normal sensor: usable in curves, \"Highest temp\", the overlay, the tray and the CSV.",
+                Foreground = SUB, FontSize = 11.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10)
+            });
+
+            var row = new StackPanel { Orientation = Orientation.Horizontal };
+            customKeyCombo = new ComboBox { Width = 150, VerticalAlignment = VerticalAlignment.Center };
+            row.Children.Add(customKeyCombo);
+            customNameBox = new TextBox { Width = 230, Margin = new Thickness(10, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center, ToolTip = "The name you want to see, e.g. \"Northbridge\"" };
+            row.Children.Add(customNameBox);
+            var add = Chip("Add", ACCENT, Brushes.White, delegate { AddCustomSensor(); });
+            add.Margin = new Thickness(10, 0, 0, 0);
+            row.Children.Add(add);
+            col.Children.Add(row);
+
+            col.Children.Add(new TextBlock {
+                Text = "The list fills in once you press \"Show all sensors (raw)\" above.",
+                Foreground = SUB, Opacity = 0.7, FontSize = 10.5, Margin = new Thickness(2, 6, 0, 0)
+            });
+
+            customList = new StackPanel { Margin = new Thickness(0, 10, 0, 0) };
+            col.Children.Add(customList);
+            RefreshCustomList();
+            FillCustomKeyCombo();
+
+            parent.Children.Add(Card(col));
+        }
+
+        // Claves crudas detectadas que todav�a no tienen nombre
+        readonly List<string> rawKeys = new List<string>();
+
+        void FillCustomKeyCombo() {
+            if (customKeyCombo == null) return;
+            customKeyCombo.Items.Clear();
+            foreach (var k in rawKeys) {
+                bool known = false;
+                foreach (var c in SENSORS) if (c[0] == k) { known = true; break; }
+                if (!known) customKeyCombo.Items.Add(new ComboBoxItem { Content = k.Trim(), Tag = k });
+            }
+            if (customKeyCombo.Items.Count > 0) customKeyCombo.SelectedIndex = 0;
+        }
+
+        void RefreshCustomList() {
+            if (customList == null) return;
+            customList.Children.Clear();
+            foreach (var kv in new List<KeyValuePair<string, string>>(Settings.CustomSensors)) {
+                string key = kv.Key;
+                var r = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 6) };
+                r.Children.Add(new TextBlock { Text = kv.Value, Foreground = TXT, FontSize = 12.5, Width = 230, VerticalAlignment = VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis });
+                r.Children.Add(new TextBlock { Text = key.Trim(), Foreground = SUB, Opacity = 0.6, FontSize = 10.5, FontFamily = new FontFamily("Consolas"), Width = 50, VerticalAlignment = VerticalAlignment.Center });
+                var del = Chip("Remove", CHIP, TXT, delegate {
+                    Settings.CustomSensors.Remove(key);
+                    Settings.Save();
+                    ApplySensorChange("Removed " + key.Trim() + ".");
+                });
+                del.Padding = new Thickness(11, 5, 11, 5);
+                r.Children.Add(del);
+                customList.Children.Add(r);
+            }
+        }
+
+        void AddCustomSensor() {
+            var it = customKeyCombo.SelectedItem as ComboBoxItem;
+            if (it == null) { status.Text = "Press \"Show all sensors (raw)\" first, then pick a key."; return; }
+            string key = it.Tag as string;
+            string name = (customNameBox.Text ?? "").Trim();
+            if (name.Length == 0) { status.Text = "Give the sensor a name first."; return; }
+            double v = Smc.ReadTemp(key);
+            if (double.IsNaN(v)) { status.Text = key.Trim() + " isn't reading a temperature right now."; return; }
+            Settings.CustomSensors[key] = name;
+            Settings.Save();
+            customNameBox.Text = "";
+            ApplySensorChange("Added " + name + " (" + key.Trim() + ").");
+        }
+
+        // Aplica en caliente un cambio en la lista de sensores: rehace la p�gina de
+        // sensores y el panel de la p�gina de fans, y a�ade/quita la entrada en los
+        // desplegables de curva, en el de la bandeja y en los chips del overlay.
+        void ApplySensorChange(string message) {
+            RebuildSensorList();
+
+            bool wasShowingAll = showAll;
+            curatedLabels.Clear();
+            allLabels.Clear();
+            allLoaded = false; showAll = false;
+            sensorsPage.Children.Clear();
+            BuildTempsPane(sensorsPage);
+            if (wasShowingAll) ToggleAll();     // reusa rawKeys, no vuelve a enumerar
+
+            summaryLabels.Clear();
+            liveTempsHost.Children.Clear();
+            BuildLiveTemps(liveTempsHost);
+
+            foreach (var f in fans) if (f.CurveSensor != null) RefillSensorCombo(f.CurveSensor, f.CurveSensorKey, true);
+            if (trayModeCombo != null) RefillTrayCombo();
+
+            if (overlayWrap != null) {
+                overlayWrap.Children.Clear();
+                overlayItemList = new List<string[]>();
+                foreach (var f in fans) overlayItemList.Add(new[] { "fan" + f.Index, "Fan " + f.Index });
+                foreach (var c in SENSORS) if (curatedLabels.ContainsKey(c[0])) overlayItemList.Add(new[] { c[0], c[1] });
+                foreach (var it2 in overlayItemList) overlayWrap.Children.Add(MakeOverlayChip(it2[0], it2[1]));
+            }
+            RefreshOverlayNow();
+            status.Text = message;
+        }
+
+        // Rellena un desplegable de sensores conservando la selecci�n actual.
+        void RefillSensorCombo(ComboBox combo, string selectedKey, bool withHighest) {
+            combo.Items.Clear();
+            if (withHighest) combo.Items.Add(new ComboBoxItem { Content = "Highest temp (any sensor)", Tag = HIGHEST_SENSOR });
+            foreach (var c in SENSORS) {
+                if (!curatedLabels.ContainsKey(c[0])) continue;
+                combo.Items.Add(new ComboBoxItem { Content = c[1], Tag = c[0] });
+            }
+            foreach (var obj in combo.Items) {
+                var ci = obj as ComboBoxItem;
+                if (ci != null && (ci.Tag as string) == selectedKey) { combo.SelectedItem = ci; break; }
+            }
+            if (combo.SelectedItem == null && combo.Items.Count > 0) combo.SelectedIndex = 0;
+        }
+
+        void RefillTrayCombo() {
+            string sel = Settings.TrayMode;
+            trayModeCombo.Items.Clear();
+            trayModeCombo.Items.Add(new ComboBoxItem { Content = "App Icon", Tag = "icon" });
+            trayModeCombo.Items.Add(new ComboBoxItem { Content = "None", Tag = "none" });
+            trayModeCombo.Items.Add(new ComboBoxItem { Content = "Highest Temp", Tag = "highest" });
+            foreach (var c in SENSORS)
+                if (curatedLabels.ContainsKey(c[0])) trayModeCombo.Items.Add(new ComboBoxItem { Content = c[1], Tag = c[0] });
+            foreach (var obj in trayModeCombo.Items) {
+                var ci = obj as ComboBoxItem;
+                if (ci != null && (ci.Tag as string) == sel) { trayModeCombo.SelectedItem = ci; break; }
+            }
+            if (trayModeCombo.SelectedItem == null) trayModeCombo.SelectedIndex = 0;
         }
 
         void ToggleAll() {
             showAll = !showAll;
             allContainer.Visibility = showAll ? Visibility.Visible : Visibility.Collapsed;
-            if (showAll && !allLoaded) {
-                allLoaded = true;
-                allPanel.Children.Add(new TextBlock { Text = "Detecting sensors… (raw, unverified list)", Foreground = SUB });
-                new Thread(delegate () {
-                    var keys = Smc.EnumTempKeys();
-                    Dispatcher.Invoke((Action)delegate {
-                        allPanel.Children.Clear();
-                        foreach (var k in keys) allPanel.Children.Add(TempRow(k, k, allLabels, 200));
-                    });
-                }) { IsBackground = true }.Start();
+            if (!showAll || allLoaded) return;
+            allLoaded = true;
+
+            // Enumerar todo el espacio de claves del SMC es lento, así que se hace una sola
+            // vez y se guarda: al rehacer la página (al nombrar un sensor) se reutiliza.
+            if (rawKeys.Count > 0) {
+                foreach (var k in rawKeys) allPanel.Children.Add(TempRow(k, k, allLabels, 200));
+                FillCustomKeyCombo();
+                return;
             }
+            allPanel.Children.Add(new TextBlock { Text = "Detecting sensors… (raw, unverified list)", Foreground = SUB });
+            new Thread(delegate () {
+                var keys = Smc.EnumTempKeys();
+                Dispatcher.Invoke((Action)delegate {
+                    allPanel.Children.Clear();
+                    rawKeys.Clear();
+                    foreach (var k in keys) { rawKeys.Add(k); allPanel.Children.Add(TempRow(k, k, allLabels, 200)); }
+                    FillCustomKeyCombo();
+                });
+            }) { IsBackground = true }.Start();
         }
 
         Border BuildToggle(bool initial, Action<bool> onChange) {
@@ -1630,7 +1814,7 @@ namespace RPMac {
             trayModeCombo.Items.Add(new ComboBoxItem { Content = "App Icon", Tag = "icon" });
             trayModeCombo.Items.Add(new ComboBoxItem { Content = "None", Tag = "none" });
             trayModeCombo.Items.Add(new ComboBoxItem { Content = "Highest Temp", Tag = "highest" });
-            foreach (var c in CURATED) {
+            foreach (var c in SENSORS) {
                 double v = Smc.ReadTemp(c[0]);
                 if (!double.IsNaN(v) && v >= 5 && v <= 120)
                     trayModeCombo.Items.Add(new ComboBoxItem { Content = c[1], Tag = c[0] });
@@ -1698,25 +1882,35 @@ namespace RPMac {
             // --- Que mostrar (ventiladores + sensores presentes) ---
             var items = new List<string[]>();
             foreach (var f in fans) items.Add(new[] { "fan" + f.Index, "Fan " + f.Index });
-            foreach (var c in CURATED) if (curatedLabels.ContainsKey(c[0])) items.Add(new[] { c[0], c[1] });
+            foreach (var c in SENSORS) if (curatedLabels.ContainsKey(c[0])) items.Add(new[] { c[0], c[1] });
             if (items.Count == 0) return;
 
             col.Children.Add(new TextBlock { Text = "Show in overlay", Foreground = TXT, FontSize = 13, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 14, 0, 8) });
-            var wrap = new WrapPanel { Orientation = Orientation.Horizontal };
-            foreach (var it in items) {
-                string key = it[0]; string label = it[1];
-                var tb = new TextBlock { Text = label, FontSize = 13, FontWeight = FontWeights.SemiBold };
-                var bd = new Border { CornerRadius = new CornerRadius(9), Padding = new Thickness(13, 7, 13, 7), Margin = new Thickness(0, 0, 8, 8), Cursor = Cursors.Hand, Child = tb };
-                Action paint = delegate { bool on = OverlaySel(key); bd.Background = on ? ACCENT : CHIP; tb.Foreground = on ? Brushes.White : TXT; };
-                bd.MouseLeftButtonUp += delegate {
-                    if (Settings.OverlayItems == null) { Settings.OverlayItems = new HashSet<string>(); foreach (var x in items) Settings.OverlayItems.Add(x[0]); }
-                    if (Settings.OverlayItems.Contains(key)) Settings.OverlayItems.Remove(key); else Settings.OverlayItems.Add(key);
-                    Settings.Save(); paint(); RefreshOverlayNow();
-                };
-                paint();
-                wrap.Children.Add(bd);
-            }
-            col.Children.Add(wrap);
+            overlayWrap = new WrapPanel { Orientation = Orientation.Horizontal };
+            overlayItemList = items;
+            foreach (var it in items) overlayWrap.Children.Add(MakeOverlayChip(it[0], it[1]));
+            col.Children.Add(overlayWrap);
+        }
+
+        // Chips de "Show in overlay". Se guardan el panel y la lista para poder a�adir uno
+        // en caliente cuando el usuario nombra un sensor nuevo.
+        WrapPanel overlayWrap;
+        List<string[]> overlayItemList;
+
+        Border MakeOverlayChip(string key, string label) {
+            var tb = new TextBlock { Text = label, FontSize = 13, FontWeight = FontWeights.SemiBold };
+            var bd = new Border { CornerRadius = new CornerRadius(9), Padding = new Thickness(13, 7, 13, 7), Margin = new Thickness(0, 0, 8, 8), Cursor = Cursors.Hand, Child = tb };
+            Action paint = delegate { bool on = OverlaySel(key); bd.Background = on ? ACCENT : CHIP; tb.Foreground = on ? Brushes.White : TXT; };
+            bd.MouseLeftButtonUp += delegate {
+                if (Settings.OverlayItems == null) {
+                    Settings.OverlayItems = new HashSet<string>();
+                    foreach (var x in overlayItemList) Settings.OverlayItems.Add(x[0]);
+                }
+                if (Settings.OverlayItems.Contains(key)) Settings.OverlayItems.Remove(key); else Settings.OverlayItems.Add(key);
+                Settings.Save(); paint(); RefreshOverlayNow();
+            };
+            paint();
+            return bd;
         }
 
         // ---- System tray ----
@@ -1998,7 +2192,7 @@ namespace RPMac {
                                 temp = kv.Value;
                     } else {
                         // Fallback: read sensors directly
-                        foreach (var c in CURATED) {
+                        foreach (var c in SENSORS) {
                             double v = Smc.ReadTemp(c[0]);
                             if (!double.IsNaN(v) && v >= 5 && v <= 120 && (double.IsNaN(temp) || v > temp))
                                 temp = v;
@@ -2414,7 +2608,7 @@ namespace RPMac {
             foreach (var fi in infos)
                 if (!double.IsNaN(fi.Actual) && OverlaySel("fan" + fi.Index))
                     rows.Add(new[] { "Fan " + fi.Index, ((int)fi.Actual) + " RPM" });
-            foreach (var c in CURATED) {
+            foreach (var c in SENSORS) {
                 double v;
                 if (curatedLabels.ContainsKey(c[0]) && OverlaySel(c[0]) && curated.TryGetValue(c[0], out v) && !double.IsNaN(v))
                     rows.Add(new[] { c[1], FormatTemp(v) });
@@ -2578,6 +2772,8 @@ namespace RPMac {
         public static int GuardTemp = 90;
         // Guarda una fila por refresco en %APPDATA%\RPMac\history.csv
         public static bool LogToFile = false;
+        // Sensores que el usuario ha nombrado a mano: clave SMC -> nombre a mostrar.
+        public static Dictionary<string, string> CustomSensors = new Dictionary<string, string>();
 
         public static void Load() {
             try {
@@ -2595,6 +2791,11 @@ namespace RPMac {
                     else if (s.Length >= 2 && s[0] == "guard") SafetyGuard = (s[1] == "1");
                     else if (s.Length >= 2 && s[0] == "guardtemp") { int g; if (int.TryParse(s[1], out g) && g >= 60 && g <= 105) GuardTemp = g; }
                     else if (s.Length >= 2 && s[0] == "logcsv") LogToFile = (s[1] == "1");
+                    // sensor|<clave SMC>|<nombre puesto por el usuario>
+                    else if (s.Length >= 3 && s[0] == "sensor") {
+                        string k = s[1].Trim(), nm = s[2].Trim();
+                        if (k.Length >= 3 && k.Length <= 4 && nm.Length > 0) CustomSensors[k] = nm;
+                    }
                     else if (s.Length >= 4 && s[0] == "fan") {
                         int idx;
                         if (int.TryParse(s[1], out idx)) {
@@ -2634,6 +2835,7 @@ namespace RPMac {
                 lines.Add("guard|" + (SafetyGuard ? "1" : "0"));
                 lines.Add("guardtemp|" + GuardTemp);
                 lines.Add("logcsv|" + (LogToFile ? "1" : "0"));
+                foreach (var kv in CustomSensors) lines.Add("sensor|" + kv.Key + "|" + kv.Value.Replace("|", " "));
                 foreach (var kv in Fans) lines.Add("fan|" + kv.Key + "|" + string.Join("|", kv.Value));
                 foreach (var p in Presets)
                     foreach (var kv in p.Value)
@@ -2748,3 +2950,4 @@ namespace RPMac {
         }
     }
 }
+

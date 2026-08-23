@@ -325,9 +325,17 @@ namespace RPMac {
                     }
                     if (double.IsNaN(n) || n < 1 || n > 8) {
                         WritesAllowed = false;
-                        string t2hint = registrySaysApple && useMmio
-                            ? " T2 module loaded but the SMC did not respond — the T2 register layout on this model may differ."
-                            : (registrySaysApple ? " Looks like a T2 Mac. " + (MmioError != "" ? MmioError : "Install PawnIO (pawnio.eu) and keep AppleT2Smc.bin next to RPMac.exe.") : "");
+                        // No hay que insinuar que al usuario "le falta un archivo": el módulo
+                        // T2 no se distribuye porque todavía no está firmado, así que ir a
+                        // buscarlo es perder el tiempo. Mejor decir la verdad.
+                        string t2hint;
+                        if (registrySaysApple && useMmio)
+                            t2hint = " The T2 module loaded but the SMC did not answer — the register layout on this model may differ. Please open an issue with your model identifier.";
+                        else if (registrySaysApple)
+                            t2hint = " This looks like a T2 Mac (2018-2020). The T2 chip intercepts the SMC, so RPMac cannot reach it yet and stays read-only."
+                                   + " Support is written but needs its kernel module signed before it can ship — see github.com/golirt1/RPMAC for where that stands.";
+                        else
+                            t2hint = "";
                         SafetyReason = "SMC did not return a valid fan count (got " + (double.IsNaN(n) ? "NaN" : n.ToString()) + "). Read-only for safety." + t2hint;
                         return false;
                     }
