@@ -37,7 +37,7 @@ namespace RPMac {
         internal static readonly SolidColorBrush WARN   = (SolidColorBrush)B("#FFB340"); // ámbar: temperatura alta / read-only
         internal static readonly SolidColorBrush GOOD   = (SolidColorBrush)B("#34C759"); // verde: todo bien
 
-        const string VERSION = "1.7.0";
+        const string VERSION = "1.8.0";
 
         static void SetC(SolidColorBrush b, string hex) { b.Color = (Color)ColorConverter.ConvertFromString(hex); }
         static bool IsDark(string t) { return t != "light" && t != "japan"; }
@@ -965,6 +965,110 @@ namespace RPMac {
 
         bool lastGuardHit = false;
 
+        // ---- Apagado de emergencia -----------------------------------------------
+        // Apagar la máquina de alguien es lo más destructivo que hace RPMac, así que
+        // una sola lectura nunca basta: la condición tiene que mantenerse durante
+        // SHUTDOWN_CONFIRM_TICKS refrescos seguidos (el bucle corre cada 2 s, así que
+        // son ~30 s). Un pico o una lectura con ruido reinicia la cuenta a cero.
+        const int SHUTDOWN_CONFIRM_TICKS = 15;
+        int overTempTicks = 0;
+        int fanStallTicks = 0;
+        // Lo escribe el hilo de refresco y lo reinicia el interruptor en la UI.
+        volatile bool shutdownFired = false;   // una vez lanzado, no se repite
+
+        static string ShutdownLogPath {
+            get {
+                return System.IO.Path.Combine(
+                    System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "RPMac"),
+                    "shutdown.log");
+            }
+        }
+
+        // Corre en el hilo de refresco, después de que los ventiladores ya reaccionaron.
+        // Devuelve el motivo si hay que apagar, o null.
+        string EmergencyShutdownReason(List<FanInfo> infos, double hottest) {
+            if (!Settings.EmergencyShutdown || shutdownFired) {
+                overTempTicks = 0; fanStallTicks = 0;
+                return null;
+            }
+
+            // 1) Temperatura sostenida. NaN no cuenta: un fallo de lectura no es calor.
+            bool overTemp = !double.IsNaN(hottest) && hottest >= Settings.ShutdownTemp;
+            overTempTicks = overTemp ? overTempTicks + 1 : 0;
+
+            // 2) Ventilador parado. Solo cuenta si a ESE ventilador se le pidió girar
+            //    por encima del umbral: uno legítimamente quieto en reposo no dispara
+            //    nada, y una lectura inválida tampoco se toma por "parado".
+            int stalledIdx = -1;
+            if (Settings.ShutdownOnStall) {
+                foreach (var fi in infos) {
+                    if (double.IsNaN(fi.Actual) || double.IsNaN(fi.Target)) continue;
+                    if (fi.Target < Settings.StallRpm) continue;
+                    if (fi.Actual < Settings.StallRpm) { stalledIdx = fi.Index; break; }
+                }
+            }
+            fanStallTicks = (stalledIdx >= 0) ? fanStallTicks + 1 : 0;
+
+            int secs = SHUTDOWN_CONFIRM_TICKS * 2;
+            if (overTempTicks >= SHUTDOWN_CONFIRM_TICKS)
+                return string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "temperature stayed at or above {0}°C for {1} seconds (last reading {2:0.0}°C)",
+                    Settings.ShutdownTemp, secs, hottest);
+            if (fanStallTicks >= SHUTDOWN_CONFIRM_TICKS)
+                return string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                    "fan {0} stayed below {1} RPM for {2} seconds while it was being told to spin faster than that",
+                    stalledIdx, Settings.StallRpm, secs);
+            return null;
+        }
+
+        // Deja constancia y llama a shutdown.exe. El usuario no está delante — el
+        // rastro en disco es la única forma de que sepa por qué se apagó al volver.
+        void TriggerShutdown(string reason) {
+            shutdownFired = true;
+            string stamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            string args = Settings.ShutdownArgs;
+            try {
+                string dir = System.IO.Path.GetDirectoryName(ShutdownLogPath);
+                if (!System.IO.Directory.Exists(dir)) System.IO.Directory.CreateDirectory(dir);
+                System.IO.File.AppendAllText(ShutdownLogPath,
+                    stamp + "  RPMac emergency shutdown: " + reason + "\r\n" +
+                    stamp + "  ran: shutdown.exe " + args + "\r\n");
+            } catch { }
+
+            bool launched = false; string err = null;
+            try {
+                // Ejecutable fijo a propósito: solo los argumentos son configurables,
+                // así que este campo no puede convertirse en un lanzador de cualquier cosa.
+                string exe = System.IO.Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.System), "shutdown.exe");
+                var psi = new System.Diagnostics.ProcessStartInfo(exe, args);
+                psi.UseShellExecute = false;
+                psi.CreateNoWindow = true;
+                System.Diagnostics.Process.Start(psi);
+                launched = true;
+            } catch (Exception ex) {
+                err = ex.Message;
+                App.LogError("TriggerShutdown", ex);
+                try { System.IO.File.AppendAllText(ShutdownLogPath, stamp + "  FAILED: " + ex.Message + "\r\n"); } catch { }
+            }
+
+            try {
+                Dispatcher.Invoke((Action)delegate {
+                    if (launched) {
+                        status.Text = "EMERGENCY SHUTDOWN — " + reason + ". Run  shutdown /a  to cancel.";
+                        if (tray != null) {
+                            tray.BalloonTipTitle = "RPMac is shutting this PC down";
+                            tray.BalloonTipText = reason + "\r\nRun  shutdown /a  to cancel.";
+                            tray.BalloonTipIcon = System.Windows.Forms.ToolTipIcon.Warning;
+                            try { tray.ShowBalloonTip(30000); } catch { }
+                        }
+                    } else {
+                        status.Text = "Emergency shutdown was triggered but shutdown.exe failed: " + err;
+                    }
+                });
+            } catch { }
+        }
+
         // ---- Registro a CSV -------------------------------------------------------
         // Una fila por refresco: hora, RPM de cada ventilador y cada sensor curado.
         // Sirve para ver qué pasó durante una partida o un render largo.
@@ -1780,6 +1884,121 @@ namespace RPMac {
             guardRow.Children.Add(guardSlider);
             col.Children.Add(guardRow);
 
+            // ---- Emergency shutdown ----
+            // El escalón por encima del anterior, pensado para máquinas desatendidas.
+            // Apagar el PC de alguien es destructivo, así que esto llega apagado, pide
+            // confirmación sostenida en el bucle, y deja siempre un rastro en disco.
+            var rowSd = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 18, 0, 0) };
+            var labelsSd = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            labelsSd.Children.Add(new TextBlock { Text = "Emergency shutdown", Foreground = TXT, FontSize = 13, FontWeight = FontWeights.SemiBold });
+            var sdSub = new TextBlock { Foreground = SUB, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) };
+            labelsSd.Children.Add(sdSub);
+            var toggleSd = BuildToggle(Settings.EmergencyShutdown, delegate (bool on) {
+                Settings.EmergencyShutdown = on; Settings.Save();
+                shutdownFired = false; overTempTicks = 0; fanStallTicks = 0;
+                status.Text = on ? "Emergency shutdown: on" : "Emergency shutdown: off";
+            });
+            DockPanel.SetDock(toggleSd, Dock.Right);
+            rowSd.Children.Add(toggleSd);
+            rowSd.Children.Add(labelsSd);
+            col.Children.Add(rowSd);
+
+            // umbral de apagado — siempre por encima del de enfriamiento
+            const int SHUT_GAP = 5;
+            var sdRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+            var sdSlider = new Slider { Minimum = 70, Maximum = 110, Value = Settings.ShutdownTemp, Width = 260, VerticalAlignment = VerticalAlignment.Center };
+            bool syncingTemps = false;
+            Action paintSd = delegate {
+                sdSub.Text = string.Format(
+                    "For a machine nobody is watching. If the hottest sensor stays at {0} or above for {1} seconds — with the fans already at maximum — Windows is told to shut down cleanly instead of waiting for the CPU to cut power on its own.",
+                    ShortTemp(Settings.ShutdownTemp), SHUTDOWN_CONFIRM_TICKS * 2);
+            };
+            paintSd();
+            // El apagado tiene que quedar por encima del enfriamiento: si no, apagaría
+            // antes de haber intentado enfriar siquiera.
+            Action syncFromGuard = delegate {
+                if (syncingTemps) return;
+                if (sdSlider.Value < Settings.GuardTemp + SHUT_GAP) {
+                    syncingTemps = true;
+                    sdSlider.Value = Math.Min(sdSlider.Maximum, Settings.GuardTemp + SHUT_GAP);
+                    Settings.ShutdownTemp = (int)sdSlider.Value;
+                    paintSd();
+                    syncingTemps = false;
+                }
+            };
+            sdSlider.ValueChanged += delegate {
+                if (syncingTemps) return;
+                if (sdSlider.Value < Settings.GuardTemp + SHUT_GAP) {
+                    syncingTemps = true;
+                    sdSlider.Value = Math.Min(sdSlider.Maximum, Settings.GuardTemp + SHUT_GAP);
+                    syncingTemps = false;
+                }
+                Settings.ShutdownTemp = (int)sdSlider.Value;
+                paintSd();
+            };
+            sdSlider.PreviewMouseUp += delegate { Settings.Save(); };
+            guardSlider.ValueChanged += delegate { syncFromGuard(); };
+            syncFromGuard();
+            sdRow.Children.Add(new TextBlock { Text = "Shut down at", Foreground = SUB, FontSize = 12, Width = 90, VerticalAlignment = VerticalAlignment.Center });
+            sdRow.Children.Add(sdSlider);
+            col.Children.Add(sdRow);
+
+            // apagado también si un ventilador que debería girar se queda parado
+            var rowStall = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 12, 0, 0) };
+            var labelsStall = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            labelsStall.Children.Add(new TextBlock { Text = "Also shut down if a fan stalls", Foreground = TXT, FontSize = 12.5 });
+            var stallSub = new TextBlock { Foreground = SUB, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 2, 0, 0) };
+            labelsStall.Children.Add(stallSub);
+            var toggleStall = BuildToggle(Settings.ShutdownOnStall, delegate (bool on) {
+                Settings.ShutdownOnStall = on; Settings.Save();
+                fanStallTicks = 0;
+                status.Text = on ? "Fan-stall shutdown: on" : "Fan-stall shutdown: off";
+            });
+            DockPanel.SetDock(toggleStall, Dock.Right);
+            rowStall.Children.Add(toggleStall);
+            rowStall.Children.Add(labelsStall);
+            col.Children.Add(rowStall);
+
+            var stallRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+            var stallSlider = new Slider { Minimum = 50, Maximum = 3000, Value = Settings.StallRpm, Width = 260, VerticalAlignment = VerticalAlignment.Center };
+            Action paintStall = delegate {
+                stallSub.Text = string.Format(
+                    "A dying fan can cook the machine long before any one sensor hits the limit above. This only counts a fan as stalled when it is being asked to spin faster than {0} RPM and reads below it anyway, for {1} seconds — so a fan that is idle on purpose never triggers it.",
+                    Settings.StallRpm, SHUTDOWN_CONFIRM_TICKS * 2);
+            };
+            paintStall();
+            stallSlider.ValueChanged += delegate {
+                Settings.StallRpm = (int)(Math.Round(stallSlider.Value / 50.0) * 50);
+                paintStall();
+            };
+            stallSlider.PreviewMouseUp += delegate { Settings.Save(); };
+            stallRow.Children.Add(new TextBlock { Text = "Below", Foreground = SUB, FontSize = 12, Width = 90, VerticalAlignment = VerticalAlignment.Center });
+            stallRow.Children.Add(stallSlider);
+            col.Children.Add(stallRow);
+
+            // argumentos de shutdown.exe (el ejecutable en sí no es configurable)
+            var argsRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 12, 0, 0) };
+            argsRow.Children.Add(new TextBlock { Text = "Command", Foreground = SUB, FontSize = 12, Width = 90, VerticalAlignment = VerticalAlignment.Center });
+            argsRow.Children.Add(new TextBlock { Text = "shutdown.exe", Foreground = SUB, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0) });
+            var argsBox = new TextBox { Text = Settings.ShutdownArgs, Width = 170, Background = BG, VerticalAlignment = VerticalAlignment.Center };
+            Action commitArgs = delegate {
+                string a = (argsBox.Text ?? "").Trim();
+                if (a.Length == 0 || a.Length > 120) { a = "/s /f /t 30"; argsBox.Text = a; }
+                Settings.ShutdownArgs = a.Replace("|", " ");
+                Settings.Save();
+            };
+            argsBox.LostFocus += delegate { commitArgs(); };
+            argsBox.KeyDown += delegate (object s, System.Windows.Input.KeyEventArgs e) {
+                if (e.Key == System.Windows.Input.Key.Enter) commitArgs();
+            };
+            argsRow.Children.Add(argsBox);
+            col.Children.Add(argsRow);
+
+            col.Children.Add(new TextBlock {
+                Text = "/s shuts down, /f forces programs to close, /t 30 waits 30 seconds first. During that wait you can still cancel it from a command prompt with  shutdown /a . Every shutdown RPMac starts is written to shutdown.log next to the CSV, so you can see why it happened.",
+                Foreground = SUB, FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 8, 0, 0)
+            });
+
             // ---- CSV log ----
             var rowLog = new DockPanel { LastChildFill = true, Margin = new Thickness(0, 14, 0, 0) };
             var labelsLog = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
@@ -2495,6 +2714,12 @@ namespace RPMac {
                         }
                         WriteLogRow(infos, curated);
 
+                        // Último recurso, un escalón por encima del enfriamiento de
+                        // emergencia: si la condición se mantiene pese a los ventiladores
+                        // al máximo, apagar en orden antes de que el hardware corte en seco.
+                        string shutReason = EmergencyShutdownReason(infos, hottest);
+                        if (shutReason != null) TriggerShutdown(shutReason);
+
                         Dispatcher.Invoke((Action)delegate {
                             foreach (var fi in infos) {
                                 if (fi.Index >= fans.Count) continue;
@@ -2770,6 +2995,16 @@ namespace RPMac {
         // sin importar el modo en el que estén.
         public static bool SafetyGuard = false;
         public static int GuardTemp = 90;
+        // Escalón por encima del anterior, para máquinas desatendidas: si pese a los
+        // ventiladores al máximo el calor se mantiene, o un ventilador al que se le
+        // pidió girar se queda parado, llamar a shutdown.exe para que Windows cierre
+        // en orden en vez de esperar al corte por hardware. Todo apagado por defecto.
+        public static bool EmergencyShutdown = false;
+        public static int ShutdownTemp = 100;
+        public static bool ShutdownOnStall = false;
+        public static int StallRpm = 200;
+        // Solo los argumentos son configurables; el ejecutable está fijo en el código.
+        public static string ShutdownArgs = "/s /f /t 30";
         // Guarda una fila por refresco en %APPDATA%\RPMac\history.csv
         public static bool LogToFile = false;
         // Sensores que el usuario ha nombrado a mano: clave SMC -> nombre a mostrar.
@@ -2790,6 +3025,11 @@ namespace RPMac {
                     else if (s.Length >= 2 && s[0] == "smooth") Smoothing = (s[1] == "1");
                     else if (s.Length >= 2 && s[0] == "guard") SafetyGuard = (s[1] == "1");
                     else if (s.Length >= 2 && s[0] == "guardtemp") { int g; if (int.TryParse(s[1], out g) && g >= 60 && g <= 105) GuardTemp = g; }
+                    else if (s.Length >= 2 && s[0] == "shutdown") EmergencyShutdown = (s[1] == "1");
+                    else if (s.Length >= 2 && s[0] == "shuttemp") { int g; if (int.TryParse(s[1], out g) && g >= 70 && g <= 110) ShutdownTemp = g; }
+                    else if (s.Length >= 2 && s[0] == "shutstall") ShutdownOnStall = (s[1] == "1");
+                    else if (s.Length >= 2 && s[0] == "shutrpm") { int g; if (int.TryParse(s[1], out g) && g >= 50 && g <= 3000) StallRpm = g; }
+                    else if (s.Length >= 2 && s[0] == "shutargs") { string a = s[1].Trim(); if (a.Length > 0 && a.Length <= 120) ShutdownArgs = a; }
                     else if (s.Length >= 2 && s[0] == "logcsv") LogToFile = (s[1] == "1");
                     // sensor|<clave SMC>|<nombre puesto por el usuario>
                     else if (s.Length >= 3 && s[0] == "sensor") {
@@ -2834,6 +3074,11 @@ namespace RPMac {
                 lines.Add("smooth|" + (Smoothing ? "1" : "0"));
                 lines.Add("guard|" + (SafetyGuard ? "1" : "0"));
                 lines.Add("guardtemp|" + GuardTemp);
+                lines.Add("shutdown|" + (EmergencyShutdown ? "1" : "0"));
+                lines.Add("shuttemp|" + ShutdownTemp);
+                lines.Add("shutstall|" + (ShutdownOnStall ? "1" : "0"));
+                lines.Add("shutrpm|" + StallRpm);
+                lines.Add("shutargs|" + ShutdownArgs.Replace("|", " "));
                 lines.Add("logcsv|" + (LogToFile ? "1" : "0"));
                 foreach (var kv in CustomSensors) lines.Add("sensor|" + kv.Key + "|" + kv.Value.Replace("|", " "));
                 foreach (var kv in Fans) lines.Add("fan|" + kv.Key + "|" + string.Join("|", kv.Value));

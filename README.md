@@ -61,6 +61,7 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 - **Curve on the hottest sensor** — instead of picking one sensor, let the fan follow whichever is hottest, so it ramps up when *either* the CPU or the GPU heats up
 - **Smooth fan changes** — ignores tiny temperature wobbles so a curve doesn't make the fan audibly hunt up and down
 - **Emergency cooling** — if any sensor reaches a temperature you set, every fan goes to maximum until it cools down
+- **Emergency shutdown** — for a machine nobody is watching: if the heat holds even with the fans at maximum, or a fan that is being told to spin stays stopped, RPMac tells Windows to shut down cleanly instead of waiting for the CPU to cut power on its own. Off by default, and it never acts on a single reading
 - **Copy a curve to all fans**, rescaled to each fan's own RPM range
 - **5-minute history graph** of temperature and fan speed, plus optional **CSV recording** of every reading
 - **Presets** — save your fan setup as named profiles (e.g. Silent, Gaming) and switch with one click, from the app or the tray icon
@@ -80,7 +81,7 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 ## Install
 No installer needed — it's a portable app.
 
-1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.7.0-windows.zip` (under **Assets**).
+1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.8.0-windows.zip` (under **Assets**).
 2. **Unzip it** to any folder you like (e.g. your Desktop). Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` **together in the same folder**.
 3. **Right-click `RPMac.exe` → "Run as administrator"** (administrator rights are required to access the Mac's hardware/SMC).
 4. Set each fan to **Auto / Max / a custom RPM**. Temperatures update live.

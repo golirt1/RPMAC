@@ -1,3 +1,24 @@
+## RPMac v1.8.0
+
+**The other app capable of controlling fans on Intel Macs in Windows — for free.**
+
+### What's new in 1.8.0
+
+- **Emergency shutdown.** For a Mac left running unattended — a home server, an HTPC, anything nobody is sitting in front of. If the heat holds even with the fans already at maximum, RPMac now tells Windows to shut down cleanly, so programs close and memory is flushed to disk, instead of waiting for the CPU to cut power on its own at ~105°C. Suggested by @Mac-Apex.
+- **Fan-stall detection.** A dying fan can cook a machine long before any single sensor reaches a temperature limit. RPMac can now also shut down when a fan it is *telling to spin* keeps reading below a speed you set — something it can detect precisely because it knows both the commanded speed and the real one.
+- **It never acts on one reading.** Both triggers require the condition to hold for **30 seconds straight**; any normal reading in between resets the count. An invalid reading is never treated as 0 RPM, and a fan that is idle on purpose is never treated as stalled. Everything here is **off by default**, and the shutdown threshold is always kept above the emergency-cooling one.
+- **You can see why it happened.** Every shutdown RPMac starts is written to `shutdown.log` in `%APPDATA%\RPMac`, with the reason and the exact command. The command runs with a 30-second delay by default (`/s /f /t 30`), so `shutdown /a` cancels it. The arguments are editable in Settings; the program being run is fixed to Windows' own `shutdown.exe`.
+
+### Download
+Download `RPMac-v1.8.0-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
+Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` together in the same folder.
+
+> **If Windows blocks it:** RPMac isn't code-signed, so Windows doesn't recognise it yet. On **SmartScreen** choose *More info → Run anyway*; if **Smart App Control** blocks it the app just won't start, so either turn Smart App Control off in *Windows Security → App & browser control*, or build RPMac yourself from source. This is normal for any unsigned utility that talks to hardware — the full source is in this repo.
+
+Read-only and safe on non-Apple hardware. License: GPL-2.0-only.
+
+---
+
 ## RPMac v1.7.0
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**

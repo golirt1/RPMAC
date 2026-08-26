@@ -23,6 +23,14 @@ Worth turning on in Settings
   the temperature wobbles by a degree.
 - "Emergency cooling" sends every fan to maximum if any sensor reaches the
   temperature you pick, whatever mode the fans are in.
+- "Emergency shutdown" (off by default) is the step above that, for a machine
+  nobody is watching. If the heat holds even with the fans at maximum, or a fan
+  that is being told to spin keeps reading below a speed you set, Windows is
+  told to shut down cleanly rather than waiting for the CPU to cut power on its
+  own. Neither trigger ever acts on a single reading - the condition has to
+  hold for 30 seconds straight. The default command waits 30 seconds, so
+  "shutdown /a" in a command prompt cancels it, and every shutdown RPMac starts
+  is written to shutdown.log next to the CSV so you can see why.
 - "Record to a CSV file" appends every reading to history.csv, so you can look
   back at what ran hot during a game or a long render.
 
