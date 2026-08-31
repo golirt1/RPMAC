@@ -17,6 +17,7 @@ using System.IO;
 using System.Text;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 class SmcCore {
     [DllImport("inpout32.dll")] static extern short Inp32(short port);
@@ -75,7 +76,33 @@ class SmcCore {
         ret = SendCommand(READ_CMD); if (ret != 0) return ret;
         return WaitStatus(0, BUSY);
     }
+    // Mismo mutex global que RPMac.exe: las dos herramientas hablan con el mismo
+    // SMC y sin esto se intercalan transacciones, lo que produce lecturas basura.
+    // El nombre esta documentado para que otras herramientas puedan cooperar.
+    const string SMC_MUTEX_NAME = @"Global\AppleSmcAccess";
+    const int SMC_MUTEX_WAIT_MS = 1000;
+    static Mutex smcMutex;
+    static bool smcMutexTried;
+
+    static Mutex SmcMutex() {
+        if (smcMutexTried) return smcMutex;
+        smcMutexTried = true;
+        try { bool created; smcMutex = new Mutex(false, SMC_MUTEX_NAME, out created); }
+        catch { smcMutex = null; }
+        return smcMutex;
+    }
+
+    static bool SmcEnter(Mutex m) {
+        if (m == null) return true;
+        try { return m.WaitOne(SMC_MUTEX_WAIT_MS); }
+        catch (AbandonedMutexException) { return true; }
+        catch { return false; }
+    }
+
     static int ReadSmc(byte cmd, byte[] key4, byte[] buf, int len) {
+        Mutex mtx = SmcMutex();
+        if (!SmcEnter(mtx)) return -1;
+        try {
         int ret = SmcSane(); if (ret != 0) return ret;
         if (SendCommand(cmd) != 0 || SendArgument(key4) != 0) return -1;
         if (SendByte((byte)len, DATA) != 0) return -1;
@@ -89,13 +116,18 @@ class SmcCore {
             InbData();
         }
         return WaitStatus(0, BUSY);
+        } finally { if (mtx != null) { try { mtx.ReleaseMutex(); } catch { } } }
     }
     static int WriteSmc(byte[] key4, byte[] buf, int len) {
+        Mutex mtx = SmcMutex();
+        if (!SmcEnter(mtx)) return -1;
+        try {
         int ret = SmcSane(); if (ret != 0) return ret;
         if (SendCommand(WRITE_CMD) != 0 || SendArgument(key4) != 0) return -1;
         if (SendByte((byte)len, DATA) != 0) return -1;
         for (int i = 0; i < len; i++) if (SendByte(buf[i], DATA) != 0) return -1;
         return WaitStatus(0, BUSY);
+        } finally { if (mtx != null) { try { mtx.ReleaseMutex(); } catch { } } }
     }
 
     // ---------------- helpers de clave / tipo ----------------

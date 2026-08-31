@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Threading;
 
 namespace RPMac {
 
@@ -148,6 +149,33 @@ namespace RPMac {
 
         static readonly object gate = new object();
 
+        // 'gate' solo serializa dentro de este proceso. PawnIO serializa los ioctl
+        // dentro de una copia cargada del modulo, pero dos programas distintos
+        // pueden cargar cada uno la suya e intercalar transacciones SMC
+        // (namazso, PawnIO.Modules#71); la ruta por puertos 0x300/0x304 tiene el
+        // mismo problema desde siempre. Un mutex con nombre global hace que una
+        // transaccion SMC sea atomica entre procesos. El nombre esta documentado
+        // para que cualquier otra herramienta que lo adopte coopere sola.
+        const string SMC_MUTEX_NAME = @"Global\AppleSmcAccess";
+        const int SMC_MUTEX_WAIT_MS = 1000;
+        static Mutex smcMutex;
+        static bool smcMutexTried;
+
+        static Mutex SmcMutex() {
+            if (smcMutexTried) return smcMutex;
+            smcMutexTried = true;
+            try {
+                bool created;
+                smcMutex = new Mutex(false, SMC_MUTEX_NAME, out created);
+            } catch {
+                // Sin privilegio para el espacio Global (o politica que lo impide):
+                // seguimos con 'gate' solo, que es lo que habia antes.
+                smcMutex = null;
+            }
+            return smcMutex;
+        }
+
+
         // ---- I/O port protocol (pre-T2 Macs) ----
         static void Udelay(int us) {
             long ticks = (long)(us * (Stopwatch.Frequency / 1000000.0));
@@ -224,10 +252,38 @@ namespace RPMac {
 
         // ---- unified dispatch ----
         static int ReadSmc(byte cmd, byte[] key, byte[] buf, int len) {
-            return useMmio ? MmioReadSmc(cmd, key, buf, len) : PortReadSmc(cmd, key, buf, len);
+            Mutex m = SmcMutex();
+            bool held = false;
+            try {
+                if (m != null) {
+                    // Si otro proceso abandono el mutex al morir no hay estado que
+                    // reparar: el SMC no guarda nada entre transacciones.
+                    try { held = m.WaitOne(SMC_MUTEX_WAIT_MS); }
+                    catch (AbandonedMutexException) { held = true; }
+                    catch { held = false; }
+                    // Antes que intercalar una transaccion con otro programa,
+                    // fallar esta lectura: la capa de arriba ya trata el fallo.
+                    if (!held) return -1;
+                }
+                return useMmio ? MmioReadSmc(cmd, key, buf, len) : PortReadSmc(cmd, key, buf, len);
+            } finally {
+                if (held) { try { m.ReleaseMutex(); } catch { } }
+            }
         }
         static int WriteSmc(byte[] key, byte[] buf, int len) {
-            return useMmio ? MmioWriteSmc(key, buf, len) : PortWriteSmc(key, buf, len);
+            Mutex m = SmcMutex();
+            bool held = false;
+            try {
+                if (m != null) {
+                    try { held = m.WaitOne(SMC_MUTEX_WAIT_MS); }
+                    catch (AbandonedMutexException) { held = true; }
+                    catch { held = false; }
+                    if (!held) return -1;
+                }
+                return useMmio ? MmioWriteSmc(key, buf, len) : PortWriteSmc(key, buf, len);
+            } finally {
+                if (held) { try { m.ReleaseMutex(); } catch { } }
+            }
         }
 
         // ---- helpers ----
