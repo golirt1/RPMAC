@@ -388,8 +388,14 @@ namespace RPMac {
                         if (registrySaysApple && useMmio)
                             t2hint = " The T2 module loaded but the SMC did not answer — the register layout on this model may differ. Please open an issue with your model identifier.";
                         else if (registrySaysApple)
-                            t2hint = " This looks like a T2 Mac (2018-2020). The T2 chip intercepts the SMC, so RPMac cannot reach it yet and stays read-only."
-                                   + " Support is written but needs its kernel module signed before it can ship — see github.com/golirt1/RPMAC for where that stands.";
+                            // No afirmar que es un T2: esto salta en CUALQUIER Mac cuyo SMC no
+                            // conteste, incluidas las anteriores a 2018 con el SMC atascado, y
+                            // decirle a alguien que su Mac Pro de 2013 "parece un T2" confunde.
+                            t2hint = " On T2 Macs (2018-2020) this is expected: the T2 chip intercepts the SMC, and reaching it needs a kernel module that is written but not yet signed"
+                                   + " — see github.com/golirt1/RPMAC for where that stands. On an older Mac it usually means the SMC stopped answering; a restart clears it."
+                                   // Sin esto, un fallo al cargar el modulo es indistinguible de
+                                   // no haberlo intentado, y el probador no tiene nada que reportar.
+                                   + (MmioError.Length > 0 ? "  [T2 module: " + MmioError + "]" : "");
                         else
                             t2hint = "";
                         SafetyReason = "SMC did not return a valid fan count (got " + (double.IsNaN(n) ? "NaN" : n.ToString()) + "). Read-only for safety." + t2hint;
