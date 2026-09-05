@@ -78,18 +78,29 @@ namespace RPMac {
 
                 byte[] file = System.IO.File.ReadAllBytes(modPath);
 
-                // Attempt 1: load as-is (a signed .bin, or our already-wrapped test .bin).
+                // Intento 1: el archivo tal cual (un .bin firmado, o el nuestro ya
+                // envuelto como [sig_len=0][AMX]).
                 if (TryLoadBlob(file)) return true;
                 string firstErr = MmioError;
 
-                // Attempt 2: wrap as [sig_len = 0][AMX] in case the file is a raw .amx.
+                // El segundo intento solo tiene sentido si el archivo es un .amx crudo.
+                // Nuestro .bin YA lleva la cabecera, y volver a envolverlo produce
+                // [0000][0000][AMX]: un blob corrupto cuyo error tapaba al de verdad.
+                bool alreadyWrapped = file.Length >= 4
+                                   && file[0] == 0 && file[1] == 0 && file[2] == 0 && file[3] == 0;
+                if (alreadyWrapped) {
+                    MmioError = firstErr;
+                    return false;
+                }
+
+                // Intento 2: envolver como [sig_len = 0][AMX] por si es un .amx crudo.
                 byte[] wrapped = new byte[4 + file.Length];
                 System.Buffer.BlockCopy(file, 0, wrapped, 4, file.Length);
                 if (TryLoadBlob(wrapped)) return true;
 
-                // Keep whichever error is most informative.
-                if (firstErr.IndexOf("CreateFile", System.StringComparison.Ordinal) >= 0)
-                    MmioError = firstErr;
+                // Reportar los DOS, etiquetados. Quedarse con uno solo fue lo que
+                // escondio la causa real durante dos semanas de pruebas.
+                MmioError = "as-is: " + firstErr + " | re-wrapped: " + MmioError;
                 return false;
             } catch (System.Exception ex) {
                 MmioError = "T2 init exception: " + ex.GetType().Name + " - " + ex.Message;
@@ -108,7 +119,10 @@ namespace RPMac {
             }
             uint ret;
             if (!DeviceIoControl(h, PIO_LOAD_BINARY, blob, (uint)blob.Length, null, 0, out ret, IntPtr.Zero)) {
-                MmioError = "PawnIO refused the module (LoadBinary err " + Marshal.GetLastWin32Error() + "). Needs the PawnIO UNRESTRICTED edition for unsigned modules.";
+                // No adivinar la causa a partir del codigo: err 87 puede ser un blob
+                // malformado igual que una firma rechazada, y afirmar lo segundo mando
+                // a dos probadores a reinstalar PawnIO para nada. Solo el hecho.
+                MmioError = "LoadBinary " + LoadBinaryHint(Marshal.GetLastWin32Error());
                 CloseHandle(h);
                 return false;
             }
@@ -116,6 +130,24 @@ namespace RPMac {
             useMmio = true;
             MmioError = "";
             return true;
+        }
+
+        // Traduce el codigo de LoadBinary segun lo que hace vm_load_binary_internal
+        // en PawnIO. Solo se afirma lo que el codigo permite concluir: err 87 es
+        // STATUS_INVALID_PARAMETER, que sale de un blob malformado o de verify_sig
+        // con una firma vacia; no distingue por si solo cual de los dos, asi que no
+        // se le dice al usuario que reinstale nada.
+        static string LoadBinaryHint(int err) {
+            switch (err) {
+                case 87:   // ERROR_INVALID_PARAMETER
+                    return "err 87 (STATUS_INVALID_PARAMETER — malformed blob, or a signature check on a build without the unsigned-module bypass)";
+                case 50:   // ERROR_NOT_SUPPORTED
+                    return "err 50 (STATUS_NOT_SUPPORTED — the module loaded and its own hardware checks declined this machine)";
+                case 1:    // ERROR_INVALID_FUNCTION <- STATUS_UNSUCCESSFUL
+                    return "err 1 (the AMX itself failed to load — wrong or truncated module file)";
+                default:
+                    return "err " + err;
+            }
         }
 
         // Call a PawnIO module function. input/output are arrays of 64-bit cells.
