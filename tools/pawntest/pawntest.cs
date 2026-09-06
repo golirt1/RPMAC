@@ -6,7 +6,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 
 class PawnTest {
-    const string DEV = @"\?\GLOBALROOT\Device\PawnIO";
+    const string DEV = @"\\.\PawnIO";   // Win32 namespace path (\.\PawnIO); the GLOBALROOT form is easy to get wrong
     const uint DEVTYPE = 41394u << 16;
     const uint IOCTL_LOAD    = DEVTYPE | (0x821u << 2);
     const uint IOCTL_VERSION = DEVTYPE | (0x861u << 2);
