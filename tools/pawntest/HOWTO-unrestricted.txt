@@ -1,0 +1,42 @@
+Getting a PawnIO driver that actually loads unsigned modules
+============================================================
+
+The "Install unrestricted edition (FOR DEVELOPERS)" option in PawnIO_setup
+2.1.0 and 2.2.0 installs a driver that STILL enforces module signatures.
+This is an upstream installer bug, confirmed by the PawnIO author:
+  https://github.com/namazso/PawnIO.Setup/issues/11
+  ("please use 2.1.0 or 2.0.1, or build your own builds. To be fixed in 2.3.0")
+
+Of the published installers, 2.0.1 is the one whose unrestricted driver really
+contains the bypass. Its x64 driver is 75,536 bytes and is test-signed, so
+test-signing mode stays required.
+
+Steps (admin PowerShell)
+------------------------
+1. Uninstall the current PawnIO (Apps & Features, or PawnIO_setup.exe -uninstall).
+
+2. Remove cached copies from the DriverStore - otherwise PnP keeps binding the
+   old official driver even after the new install (this is the usual trap):
+       pnputil /enum-drivers
+   find every entry whose Original Name is pawnio.inf, then for each:
+       pnputil /delete-driver oemNN.inf /uninstall /force
+   Reboot.
+
+3. Test-signing must be on (it already is for you):
+       bcdedit /set testsigning on
+
+4. Install 2.0.1 unrestricted:
+       https://github.com/namazso/PawnIO.Setup/releases/download/2.0.1/PawnIO_setup.exe
+       (5,254,344 bytes, SHA-256 3a34b5df231f10f252c4b50d3c777534b2a2cec5e1df9466ab2dca401c068c44)
+       PawnIO_setup.exe -install -unrestricted
+   Reboot.
+
+5. Check which driver is really loaded:
+       Get-Item "$env:ProgramFiles\PawnIO\PawnIO.sys" | Select-Object Length
+   75536 = unrestricted 2.0.1 (correct).  85344 = official 2.0.1.  136504 = 2.2.0.
+
+6. Re-run pawntest:
+       pawntest.exe Echo.bin AppleT2Smc.bin
+   The "version ioctl FAILED" line is expected on 2.0.x (that IOCTL came later)
+   and is harmless. What matters is AppleT2Smc.bin no longer returning 87.
+   Then run RPMac.exe as administrator.
