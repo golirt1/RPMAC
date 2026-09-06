@@ -6,7 +6,8 @@ using System.IO;
 using System.Runtime.InteropServices;
 
 class PawnTest {
-    const string DEV = @"\\.\PawnIO";   // Win32 namespace path (\.\PawnIO); the GLOBALROOT form is easy to get wrong
+    // Try the NT path first (exists in every PawnIO), then the DOS symlink (2.0.x and 2.2.0 only).
+    static readonly string[] DEVS = { @"\\?\GLOBALROOT\Device\PawnIO", @"\\.\PawnIO" };
     const uint DEVTYPE = 41394u << 16;
     const uint IOCTL_LOAD    = DEVTYPE | (0x821u << 2);
     const uint IOCTL_VERSION = DEVTYPE | (0x861u << 2);
@@ -20,21 +21,24 @@ class PawnTest {
     static extern bool DeviceIoControl(IntPtr h, uint c, byte[] i, uint il, byte[] o, uint ol, out uint r, IntPtr ov);
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
 
+    static string opened = "";
     static IntPtr Open() {
-        IntPtr h = CreateFile(DEV, GENERIC_RW, SHARE_RW, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
-        if (h == IntPtr.Zero || h == (IntPtr)(-1)) {
-            Console.WriteLine("  CreateFile FAILED, Win32 err " + Marshal.GetLastWin32Error() + "  (PawnIO not reachable)");
-            return IntPtr.Zero;
+        int lastErr = 0;
+        foreach (string dev in DEVS) {
+            IntPtr h = CreateFile(dev, GENERIC_RW, SHARE_RW, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+            if (h != IntPtr.Zero && h != (IntPtr)(-1)) { opened = dev; return h; }
+            lastErr = Marshal.GetLastWin32Error();
         }
-        return h;
+        Console.WriteLine("  CreateFile FAILED on both paths, last Win32 err " + lastErr + "  (PawnIO not reachable / not installed)");
+        return IntPtr.Zero;
     }
 
     static void Main(string[] args) {
         Console.WriteLine("pawntest - PawnIO probe");
-        Console.WriteLine("device: " + DEV);
 
         IntPtr h = Open();
         if (h == IntPtr.Zero) return;
+        Console.WriteLine("device: " + opened);
         byte[] ver = new byte[4]; uint ret;
         if (DeviceIoControl(h, IOCTL_VERSION, null, 0, ver, 4, out ret, IntPtr.Zero)) {
             uint v = BitConverter.ToUInt32(ver, 0);
