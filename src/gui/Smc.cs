@@ -341,7 +341,14 @@ namespace RPMac {
         }
         static double Decode(string type, byte[] b, int len) {
             string t = type.TrimEnd('\0', ' ');
-            if (t == "flt" && len >= 4) { byte[] f = { b[3], b[2], b[1], b[0] }; return BitConverter.ToSingle(f, 0); }
+            // 'flt' es la excepcion al orden big-endian del SMC: viene en IEEE-754 nativo
+            // LITTLE-endian, por puertos y por MMIO. Dos fuentes verificadas en hardware:
+            // el driver Linux T2 (applesmc_t2_kmod.c: lee los 4 bytes crudos a un u32 y
+            // los interpreta como float, sin swap, mientras fpe2 si usa buffer[0]<<8|buffer[1])
+            // y charlie754/mac-fan-control-windows smc.h ("'flt' is the exception: native
+            // LITTLE-endian"). Invertirlos daba 565588 / -2147483648 / 4 RPM y rango 0-0
+            // en el MacBookPro15,1 (issue #10).
+            if (t == "flt" && len >= 4) return BitConverter.ToSingle(b, 0);
             if (t.StartsWith("fp") && t.Length == 4) return (double)UintBE(b, len) / (1 << Hex(t[3]));
             if (t.StartsWith("sp") && t.Length == 4) return (double)IntBE(b, len) / (1 << Hex(t[3]));
             if (t.StartsWith("ui")) return (double)UintBE(b, len);
@@ -350,7 +357,7 @@ namespace RPMac {
         }
         static byte[] Encode(string type, int len, double val) {
             string t = type.TrimEnd('\0', ' ');
-            if (t == "flt" && len >= 4) { byte[] f = BitConverter.GetBytes((float)val); return new byte[] { f[3], f[2], f[1], f[0] }; }
+            if (t == "flt" && len >= 4) return BitConverter.GetBytes((float)val);   // LE nativo, ver Decode
             long raw;
             if (t.StartsWith("fp") && t.Length == 4) raw = (long)Math.Round(val * (1 << Hex(t[3])));
             else if (t.StartsWith("sp") && t.Length == 4) raw = (long)Math.Round(val * (1 << Hex(t[3])));
