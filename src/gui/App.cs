@@ -2153,7 +2153,7 @@ namespace RPMac {
                 tray.ContextMenuStrip = menu;
                 tray.MouseClick += delegate(object sender, System.Windows.Forms.MouseEventArgs e) {
                     if (e.Button == System.Windows.Forms.MouseButtons.Left)
-                        menu.Show(System.Windows.Forms.Cursor.Position);
+                        ShowFromTray();
                 };
 
                 UpdateTrayPresets();
