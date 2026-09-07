@@ -2440,6 +2440,10 @@ namespace RPMac {
         // Aplica al abrir la última configuración guardada (si es seguro escribir)
         void ApplySaved() {
             if (!Smc.WritesAllowed) return;
+            if (!string.IsNullOrEmpty(Settings.ActivePreset) && Settings.Presets.ContainsKey(Settings.ActivePreset)) {
+                ApplyPreset(Settings.ActivePreset);
+                return;
+            }
             foreach (var f in fans) {
                 if (!Settings.Fans.ContainsKey(f.Index)) continue;
                 ApplyFanState(f, Settings.Fans[f.Index]);
@@ -2622,8 +2626,9 @@ namespace RPMac {
                 ApplyFanState(f, s);
                 Settings.Fans[f.Index] = s;   // also becomes the current saved state
             }
-            Settings.Save();
             activePreset = name;
+            Settings.ActivePreset = name;
+            Settings.Save();
             RebuildPresetChips();             // highlight the active one
             UpdateTrayPresets();
             status.Text = "Applied preset: " + name;
@@ -2635,9 +2640,10 @@ namespace RPMac {
             var snap = new Dictionary<int, string[]>();
             foreach (var f in fans) snap[f.Index] = FanStateToArray(f);
             Settings.Presets[name] = snap;
-            Settings.Save();
             presetNameBox.Text = "";
             activePreset = name;              // the just-saved config is now the active preset
+            Settings.ActivePreset = name;
+            Settings.Save();
             RebuildPresetChips();
             UpdateTrayPresets();
             status.Text = "Saved preset: " + name;
@@ -2645,7 +2651,7 @@ namespace RPMac {
 
         void DeletePreset(string name) {
             if (Settings.Presets.Remove(name)) {
-                if (activePreset == name) activePreset = null;
+                if (activePreset == name) { activePreset = null; Settings.ActivePreset = null; }
                 Settings.Save();
                 RebuildPresetChips();
                 UpdateTrayPresets();
@@ -2657,6 +2663,8 @@ namespace RPMac {
         void ClearActivePreset() {
             if (activePreset == null) return;
             activePreset = null;
+            Settings.ActivePreset = null;
+            Settings.Save();
             RebuildPresetChips();
             UpdateTrayPresets();
         }
@@ -2983,6 +2991,7 @@ namespace RPMac {
         public static Dictionary<int, string[]> Fans = new Dictionary<int, string[]>();
         // preset name -> (fan index -> saved state), same state form as Fans
         public static Dictionary<string, Dictionary<int, string[]>> Presets = new Dictionary<string, Dictionary<int, string[]>>();
+        public static string ActivePreset = null;
         public static bool StartMinimized = false;
         public static bool Fahrenheit = false;
         public static bool Overlay = false;
@@ -3024,6 +3033,7 @@ namespace RPMac {
                     else if (s.Length >= 2 && s[0] == "ovsel") OverlayItems = new HashSet<string>(s[1].Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries));
                     else if (s.Length >= 2 && s[0] == "theme") Theme = s[1];
                     else if (s.Length >= 2 && s[0] == "traymode") TrayMode = s[1];
+                    else if (s.Length >= 2 && s[0] == "activepreset") ActivePreset = s[1];
                     else if (s.Length >= 2 && s[0] == "smooth") Smoothing = (s[1] == "1");
                     else if (s.Length >= 2 && s[0] == "guard") SafetyGuard = (s[1] == "1");
                     else if (s.Length >= 2 && s[0] == "guardtemp") { int g; if (int.TryParse(s[1], out g) && g >= 60 && g <= 105) GuardTemp = g; }
@@ -3073,6 +3083,7 @@ namespace RPMac {
                 if (OverlayItems != null) lines.Add("ovsel|" + string.Join(",", new List<string>(OverlayItems).ToArray()));
                 lines.Add("theme|" + Theme);
                 lines.Add("traymode|" + TrayMode);
+                if (!string.IsNullOrEmpty(ActivePreset)) lines.Add("activepreset|" + ActivePreset.Replace("|", " "));
                 lines.Add("smooth|" + (Smoothing ? "1" : "0"));
                 lines.Add("guard|" + (SafetyGuard ? "1" : "0"));
                 lines.Add("guardtemp|" + GuardTemp);
