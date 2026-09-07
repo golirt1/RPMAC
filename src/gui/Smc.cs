@@ -461,6 +461,54 @@ namespace RPMac {
         }
 
         // ---- API publica ----
+        // ---- Temperature sensor names ----
+        // Human-readable names for known Apple SMC temperature keys.
+        // Includes additional sensors found on T2 Macs, especially MacBookPro15,1.
+
+        static readonly Dictionary<string, string> TempSensorNames =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) {
+
+                // ---- CPU: T2 / MacBookPro15,1 ----
+                { "TC1C", "CPU Core 1" },
+                { "TC2C", "CPU Core 2" },
+                { "TC3C", "CPU Core 3" },
+                { "TC4C", "CPU Core 4" },
+                { "TC5C", "CPU Core 5" },
+                { "TC6C", "CPU Core 6" },
+                { "TCSA", "CPU System Agent" },
+                { "TCXC", "CPU PECI" },
+                { "TCOE", "CPU Core Temp" },
+                { "TCOF", "CPU Die Temp" },
+
+                // ---- GPU ----
+                { "TGDD", "GPU Memory" },
+                { "TGDF", "GPU VRM" },
+                { "TGVP", "GPU Voltage" },
+
+                // ---- Battery ----
+                { "TB1T", "Battery Sensor 1" },
+                { "TB2T", "Battery Sensor 2" },
+
+                // ---- Cooling / Airflow ----
+                { "TF0S", "Fan Intake" },
+
+                // ---- Storage ----
+                { "TH0F", "NVMe SSD" },
+                { "TH0X", "NVMe SSD Controller" }
+            };
+
+        /// <summary>
+        /// Returns a human-readable name for a known temperature sensor.
+        /// Falls back to the raw SMC key when no mapping exists.
+        /// </summary>
+        public static string TempName(string key) {
+            if (string.IsNullOrEmpty(key))
+                return key;
+
+            string name;
+            return TempSensorNames.TryGetValue(key, out name) ? name : key;
+        }
+        
         public static int FanCount() { lock (gate) { double n = ReadNum("FNum"); return double.IsNaN(n) ? 0 : (int)n; } }
 
         public static List<FanInfo> GetFans() {
