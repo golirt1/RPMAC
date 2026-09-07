@@ -2830,7 +2830,12 @@ namespace RPMac {
             overlay.BringTopmost();
         }
         void HideOverlay() { if (overlay != null) overlay.Hide(); }
-        void ToggleOverlay() { if (overlay == null) ShowOverlay(); else HideOverlay(); }
+        void ToggleOverlay() {
+            bool visible = overlay != null && overlay.IsVisible;
+            Settings.Overlay = !visible;
+            Settings.Save();
+            if (Settings.Overlay) ShowOverlay(); else HideOverlay();
+        }
 
         // ¿Mostrar este item en el overlay? (null = todo)
         static bool OverlaySel(string key) {
