@@ -2149,7 +2149,13 @@ namespace RPMac {
                 menu.Items.Add(trayPresetsItem);
                 menu.Items.Add("Toggle Overlay", null, delegate { ToggleOverlay(); });
                 menu.Items.Add("Quit", null, delegate { QuitApp(); });
+
                 tray.ContextMenuStrip = menu;
+                tray.MouseClick += delegate(object sender, System.Windows.Forms.MouseEventArgs e) {
+                    if (e.Button == System.Windows.Forms.MouseButtons.Left)
+                        menu.Show(System.Windows.Forms.Cursor.Position);
+                };
+
                 UpdateTrayPresets();
             } catch { }
         }
