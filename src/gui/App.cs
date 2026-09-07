@@ -2147,6 +2147,7 @@ namespace RPMac {
                 menu.Items.Add("Open", null, delegate { ShowFromTray(); });
                 trayPresetsItem = new System.Windows.Forms.ToolStripMenuItem("Presets");
                 menu.Items.Add(trayPresetsItem);
+                menu.Items.Add("Toggle Overlay", null, delegate { ToggleOverlay(); });
                 menu.Items.Add("Quit", null, delegate { QuitApp(); });
                 tray.ContextMenuStrip = menu;
                 UpdateTrayPresets();
@@ -2815,6 +2816,7 @@ namespace RPMac {
             overlay.BringTopmost();
         }
         void HideOverlay() { if (overlay != null) overlay.Hide(); }
+        void ToggleOverlay() { if (overlay == null) ShowOverlay(); else HideOverlay(); }
 
         // ¿Mostrar este item en el overlay? (null = todo)
         static bool OverlaySel(string key) {
