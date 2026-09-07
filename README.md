@@ -104,7 +104,7 @@ To **uninstall**, just delete the folder. Settings live in `%APPDATA%\RPMac`; if
 | Non-Apple PCs | Read-only (writes are blocked) |
 
 ### Tested hardware
-RPMac has been verified on **four machines**:
+RPMac has been verified on **five machines**:
 
 - **Mac Pro (Late 2013)** — model identifier `MacPro6,1`
   - Intel Xeon CPU, dual AMD FirePro GPUs, single centrifugal system fan
