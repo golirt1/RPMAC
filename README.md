@@ -2,7 +2,7 @@
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**
 
-RPMac is a free and open-source fan-control utility for **Intel-based Macs running Windows via Boot Camp**. It talks directly to the Mac's **SMC (System Management Controller)** to monitor fan speeds and temperatures, and lets you set each fan to **Automatic**, **Maximum**, or a **custom RPM**.
+RPMac is a free and open-source fan-control utility for **Intel-based Macs running Windows via Boot Camp**. It talks directly to the Mac's **SMC (System Management Controller)** to monitor fan speeds and temperatures, and lets you set each fan to **Automatic**, **Maximum**, or a **custom RPM**. On T2 Macs, it talks to the slightly different SMC interface that the T2 chip exposes, controlling the fans like it would on any non-T2 Mac.
 
 Designed as a lightweight, modern alternative to paid tools, RPMac includes **hardware safety checks**: it stays read-only on non-Apple hardware and never disables the SMC's built-in thermal protection.
 
@@ -99,7 +99,7 @@ To **uninstall**, just delete the folder. Settings live in `%APPDATA%\RPMac`; if
 | Hardware | Status |
 |---|---|
 | Intel Macs (up to 2017) on Boot Camp | Should work (confirmed on MacPro6,1, MacPro3,1 and iMac17,1) |
-| Intel Macs with T2 (2018-2020) | **Not working yet** — the T2 uses a different SMC interface; support is in progress |
+| Intel Macs with T2 (2018-2020) | **Requires PawnIO Unrestricted <=2.0.1 or >= 2.3.0** — the T2 uses a different SMC interface and needs PawnIO, but the driver has issues involving PawnIO 2.1.0 & 2.2.0 Unrestricted not actually disabling verification |
 | Apple Silicon (M1+) | Not possible (no Boot Camp) |
 | Non-Apple PCs | Read-only (writes are blocked) |
 
@@ -117,6 +117,9 @@ RPMac has been verified on **four machines**:
 - **Mac mini (Early 2009)** — model identifier `Macmini3,1`
   - Intel Core 2 Duo, NVIDIA GeForce 9400, single fan — running **Windows 7 Pro SP1**
   - Manual RPM and temperatures both work; the oldest confirmed machine and the oldest confirmed Windows. Reported by @Mac-Apex
+- **MacBook Pro (16-inch, 2019)** - model identifier `MacBookPro16,1`
+  - Intel Core i9-9880H, AMD Radeon Pro 5500M, dual fan — running **Windows Server 2025 single-booted**
+  - All of the features pretty much work @matthewyang204
 
 On all four machines, reading sensors and controlling the fans (Auto / Max / custom RPM) work correctly.
 
@@ -125,7 +128,7 @@ Beyond the two Mac Pros above, RPMac has **not** been tested on other Mac models
 
 - **Fan control** is the most portable part (it uses standard keys), so it has the highest chance of working everywhere.
 - **Temperature sensor names vary by model**, so on other Macs some labeled sensors may be missing or wrong (use "Show all sensors (raw)" to see everything).
-- **T2 Macs (2018-2020) are not supported yet.** The T2 chip intercepts the legacy SMC interface, so RPMac can't read the SMC and stays read-only on these machines. A fix that reaches the SMC through a signed kernel driver (PawnIO) is in progress.
+- **T2 Macs (2018-2020) require PawnIO <=2.0.1 or >=2.3.0**, see why above in the support chart.
 - If the SMC does not respond with plausible values, RPMac **automatically stays read-only** and writes nothing.
 
 ## Help us test it
