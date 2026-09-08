@@ -49,6 +49,8 @@ if errorlevel 1 (
   exit /b 1
 )
 
+echo Copying resources...
+
 REM App config (enables catching corrupted-state exceptions so startup crashes are logged).
 copy /y "%ROOT%src\gui\RPMac.exe.config" "%ROOT%build\RPMac.exe.config" >nul 2>&1
 
@@ -57,6 +59,13 @@ REM the existing copy is identical, so don't fail the build over it.
 copy /y "%ROOT%third_party\InpOut32\inpout32.dll" "%ROOT%build\inpout32.dll" >nul 2>&1
 if not exist "%ROOT%build\inpout32.dll" (
   echo BUILD FAILED: inpout32.dll missing
+  exit /b 1
+)
+
+REM Copy the a prebuilt copy of the PawnIO driver
+copy /y "%ROOT%dist\AppleT2Smc.bin" "%ROOT%build\AppleT2Smc.bin" >nul 2>&1
+if not exist "%ROOT%build\AppleT2Smc.bin" (
+  echo BUILD FAILED: AppleT2Smc.bin missing
   exit /b 1
 )
 
