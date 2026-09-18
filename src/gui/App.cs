@@ -454,6 +454,7 @@ namespace RPMac {
             Loaded += delegate {
                 // Each step is isolated so one failure can't take down startup or hide the
                 // window, and the log tells us exactly which step failed.
+                try { Startup.FixPriority(); } catch (Exception ex) { App.LogError("FixPriority", ex); }
                 try { SetupTray(); }    catch (Exception ex) { App.LogError("SetupTray", ex); }
                 try { ApplySaved(); }   catch (Exception ex) { App.LogError("ApplySaved", ex); }
                 try { StartRefresh(); } catch (Exception ex) { App.LogError("StartRefresh", ex); }
@@ -964,6 +965,9 @@ namespace RPMac {
         }
 
         bool lastGuardHit = false;
+        // 0 = la UI esta al dia; 1 = hay un repintado en cola todavia sin ejecutar.
+        int uiBusy = 0;
+        const int REFRESH_MS = 2000;
 
         // ---- Apagado de emergencia -----------------------------------------------
         // Apagar la máquina de alguien es lo más destructivo que hace RPMac, así que
@@ -2692,7 +2696,9 @@ namespace RPMac {
 
         void StartRefresh() {
             new Thread(delegate () {
+                var sw = new System.Diagnostics.Stopwatch();
                 while (running) {
+                    sw.Restart();
                     try {
                         var infos = Smc.GetFans();
                         var curated = new Dictionary<string, double>();
@@ -2736,7 +2742,16 @@ namespace RPMac {
                         string shutReason = EmergencyShutdownReason(infos, hottest);
                         if (shutReason != null) TriggerShutdown(shutReason);
 
-                        Dispatcher.Invoke((Action)delegate {
+                        // El repintado va en BeginInvoke, no en Invoke. Con Invoke este hilo
+                        // se quedaba esperando a que el hilo de UI atendiera la cola, y bajo
+                        // carga pesada esa espera se suma al Sleep(2000): el ciclo de control
+                        // pasa de 2 s a varios segundos y la curva reacciona tarde, dejando
+                        // que la temperatura se pase del punto fijado (issue del MacBookPro12,1).
+                        // El control del ventilador ya ocurrio arriba; la UI puede ir a su ritmo.
+                        // uiBusy evita encolar repintados mas rapido de lo que la UI los consume.
+                        if (System.Threading.Interlocked.CompareExchange(ref uiBusy, 1, 0) == 0) {
+                        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, (Action)delegate {
+                          try {
                             foreach (var fi in infos) {
                                 if (fi.Index >= fans.Count) continue;
                                 var f = fans[fi.Index];
@@ -2783,11 +2798,20 @@ namespace RPMac {
                                 titleTemp.Text = FormatTemp(hot) + rpmPart;
                                 titleTemp.Foreground = TempBrush(hot);
                             }
+                          } catch { }
+                          finally { System.Threading.Interlocked.Exchange(ref uiBusy, 0); }
                         });
+                        }
                     } catch { }
-                    Thread.Sleep(2000);
+                    // Dormir lo que FALTA para completar el periodo, no 2 s enteros. Leer el
+                    // SMC bajo carga puede llevarse cientos de ms, y sumarle 2 s fijos alargaba
+                    // el ciclo justo cuando la temperatura sube mas rapido. Minimo 250 ms para
+                    // no acaparar el SMC si una vuelta sale muy lenta.
+                    long spent = sw.ElapsedMilliseconds;
+                    int rest = (int)(REFRESH_MS - spent);
+                    Thread.Sleep(rest > 250 ? rest : 250);
                 }
-            }) { IsBackground = true }.Start();
+            }) { IsBackground = true, Priority = ThreadPriority.AboveNormal }.Start();
         }
 
         // Color del valor según el calor: normal → ámbar (>=65°C) → rojo (>=80°C)
@@ -3133,6 +3157,33 @@ namespace RPMac {
             return p.ExitCode;
         }
         public static bool IsEnabled() { return Run("/query /tn " + TASK) == 0; }
+
+        // Tasks created before this fix carry Task Scheduler's default priority 7
+        // (BELOW_NORMAL), which starves the control loop under heavy CPU load and makes
+        // the curve react late. Rewriting the task is the only way to change it, so do it
+        // once, in place, for anyone who already had "start with Windows" enabled.
+        public static void FixPriority() {
+            if (!IsEnabled()) return;
+            string xmlOut = RunCapture("/query /tn " + TASK + " /xml ONE");
+            if (xmlOut == null) return;
+            if (xmlOut.IndexOf("<Priority>5</Priority>", StringComparison.Ordinal) >= 0) return;  // ya corregida
+            string exe = System.Reflection.Assembly.GetExecutingAssembly().Location;
+            if (string.IsNullOrEmpty(exe)) return;
+            Enable(exe);   // reescribe la tarea con el XML actual, que ya lleva Priority 5
+        }
+
+        static string RunCapture(string args) {
+            try {
+                var psi = new System.Diagnostics.ProcessStartInfo("schtasks.exe", args) {
+                    CreateNoWindow = true, UseShellExecute = false,
+                    RedirectStandardOutput = true, RedirectStandardError = true
+                };
+                var p = System.Diagnostics.Process.Start(psi);
+                string o = p.StandardOutput.ReadToEnd(); p.StandardError.ReadToEnd();
+                p.WaitForExit();
+                return p.ExitCode == 0 ? o : null;
+            } catch { return null; }
+        }
         public static void Enable(string exe) {
             // `schtasks /create` defaults the task to "start only if on AC power" and "stop if
             // going on battery", so on a laptop RPMac won't launch at logon while on battery.
@@ -3148,6 +3199,10 @@ namespace RPMac {
                     "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\r\n" +
                     "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>\r\n" +
                     "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\r\n" +
+                    // Task Scheduler defaults a task to priority 7 (BELOW_NORMAL), which starves
+                    // the control loop while the CPU is pegged - exactly when the curve must react.
+                    // 5 is NORMAL, the same as launching the exe by hand.
+                    "    <Priority>5</Priority>\r\n" +
                     "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>\r\n" +
                     "    <Enabled>true</Enabled>\r\n" +
                     "  </Settings>\r\n" +
