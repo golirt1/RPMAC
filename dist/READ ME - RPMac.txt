@@ -17,6 +17,15 @@ RPMac - Quick start
 
 The sidebar has four pages: Fans, Sensors, Presets and Settings.
 
+T2 Macs (2018-2020)
+-------------------
+RPMac reaches the T2's SMC through a kernel module for PawnIO (pawnio.eu).
+Until that module is signed it has to be loaded by PawnIO's UNRESTRICTED
+edition - and note that the "unrestricted" option in the PawnIO 2.1.0 and
+2.2.0 installers ships a driver that still enforces signatures, so use 2.0.1.
+Keep AppleT2Smc.bin next to RPMac.exe. On any earlier Intel Mac none of this
+applies and RPMac works on its own.
+
 Worth turning on in Settings
 ----------------------------
 - "Smooth fan changes" (on by default) stops the fan hunting up and down when

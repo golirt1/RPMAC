@@ -37,7 +37,7 @@ namespace RPMac {
         internal static readonly SolidColorBrush WARN   = (SolidColorBrush)B("#FFB340"); // ámbar: temperatura alta / read-only
         internal static readonly SolidColorBrush GOOD   = (SolidColorBrush)B("#34C759"); // verde: todo bien
 
-        const string VERSION = "1.8.0";
+        const string VERSION = "1.9.0";
 
         static void SetC(SolidColorBrush b, string hex) { b.Color = (Color)ColorConverter.ConvertFromString(hex); }
         static bool IsDark(string t) { return t != "light" && t != "japan"; }

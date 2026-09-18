@@ -1,3 +1,35 @@
+## RPMac v1.9.0
+
+**The other app capable of controlling fans on Intel Macs in Windows — for free.**
+
+### T2 Macs (2018-2020) now work
+
+RPMac reaches the T2's SMC through a kernel module for [PawnIO](https://pawnio.eu), and it has now been confirmed on real hardware — a **MacBook Pro 15-inch 2018** and a **MacBook Pro 16-inch 2019**: sensors, Auto / Max / Manual RPM and temperature curves all work. Thanks to @Kinkaliyov and @matthewyang204, who did the testing.
+
+One caveat while you wait for the module to be signed: it has to be loaded by PawnIO's **unrestricted** edition, and the "unrestricted" option in the PawnIO 2.1.0 and 2.2.0 installers ships a driver that still enforces signatures ([PawnIO.Setup#11](https://github.com/namazso/PawnIO.Setup/issues/11)) — **2.0.1** works. Once [the module is signed](https://github.com/namazso/PawnIO.Modules/pull/71) none of this setup will be needed.
+
+### Fixed
+
+- **The curve reacted late under heavy load, letting temperatures overshoot.** "Start with Windows" registered RPMac as a scheduled task, and Windows defaults those to *below normal* priority — so the control loop was starved exactly when the fan curve needed to act. On top of that, the UI repaint was blocking the loop. Measured on a Mac Pro with every core at 100%, the control cycle ran 2–12 seconds and now holds a steady 2. Existing "start with Windows" tasks repair themselves the next time RPMac starts. Reported by @blissman.
+- **Fan RPM read as nonsense on T2 Macs** (values like `565588` or `-2147483648`, and a `0-0 RPM` range). T2 fan keys are IEEE floats and were being byte-reversed; the value written for a manual setpoint was wrong for the same reason.
+- **RPMac and `smccore.exe` could talk over each other**, corrupting readings when both ran at once. Both now take a named system-wide lock around each SMC transaction.
+
+### New
+
+- **Named temperature sensors on T2 Macs** — CPU cores, GPU memory, battery, NVMe and more now show readable names instead of raw keys. Contributed by @Kinkaliyov.
+- **Left-click the tray icon to open RPMac**, and a **Toggle Overlay** entry in the tray menu. The active preset and the overlay's state are now remembered across restarts. Contributed by @matthewyang204.
+- The InpOut32 driver source is now vendored in the repo, so everything RPMac ships can be built from source. Contributed by @matthewyang204.
+
+### Download
+Download `RPMac-v1.9.0-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
+Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` together in the same folder.
+
+> **If Windows blocks it:** RPMac isn't code-signed, so Windows doesn't recognise it yet. On **SmartScreen** choose *More info → Run anyway*; if **Smart App Control** blocks it the app just won't start, so either turn Smart App Control off in *Windows Security → App & browser control*, or build RPMac yourself from source. Some antivirus tools also flag the bundled **InpOut32** driver, which is what talks to the SMC — normal for any fan-control utility. The full source is in this repo.
+
+Read-only and safe on non-Apple hardware. License: GPL-2.0-only.
+
+---
+
 ## RPMac v1.8.0
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**

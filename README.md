@@ -81,7 +81,7 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 ## Install
 No installer needed — it's a portable app.
 
-1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.8.0-windows.zip` (under **Assets**).
+1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.9.0-windows.zip` (under **Assets**).
 2. **Unzip it** to any folder you like (e.g. your Desktop). Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` **together in the same folder**.
 3. **Right-click `RPMac.exe` → "Run as administrator"** (administrator rights are required to access the Mac's hardware/SMC).
 4. Set each fan to **Auto / Max / a custom RPM**. Temperatures update live.
@@ -121,10 +121,10 @@ RPMac has been verified on **five machines**:
   - Intel Core i9-9880H, AMD Radeon Pro 5500M, dual fan — running **Windows Server 2025 single-booted**
   - All of the features pretty much work @matthewyang204
 
-On all four machines, reading sensors and controlling the fans (Auto / Max / custom RPM) work correctly.
+On all five machines, reading sensors and controlling the fans (Auto / Max / custom RPM) work correctly.
 
 ### Other Intel Macs (untested, but expected to work)
-Beyond the two Mac Pros above, RPMac has **not** been tested on other Mac models yet. That said, it is built on the **standard Apple SMC interface that is common to virtually all Intel Macs**, and the core auto-detects the number of fans and each key's data format. So it *should* work on most Intel Macs in Boot Camp, with these caveats:
+Beyond the machines above, RPMac has **not** been tested on other Mac models yet. That said, it is built on the **standard Apple SMC interface that is common to virtually all Intel Macs**, and the core auto-detects the number of fans and each key's data format. So it *should* work on most Intel Macs in Boot Camp, with these caveats:
 
 - **Fan control** is the most portable part (it uses standard keys), so it has the highest chance of working everywhere.
 - **Temperature sensor names vary by model**, so on other Macs some labeled sensors may be missing or wrong (use "Show all sensors (raw)" to see everything).
