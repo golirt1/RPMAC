@@ -1,3 +1,23 @@
+## RPMac v1.10.1
+
+**The other app capable of controlling fans on Intel Macs in Windows — for free.**
+
+### Fixed
+
+- **Picking a language could make RPMac look as if it had closed.** With *Start minimized to tray* turned on, switching between English and Italian restarted RPMac straight into the tray, so the window just disappeared. It now comes back on screen. *Start minimized* still applies when RPMac starts with Windows, and a restart after the SMC recovers still stays in the tray if that is where the window was.
+
+Everything from 1.10.0 is included: the Italian interface, recovery from an SMC left stuck by another program, and the installer script.
+
+### Download
+Download `RPMac-v1.10.1-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
+Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` together in the same folder.
+
+> **If Windows blocks it:** RPMac isn't code-signed, so Windows doesn't recognise it yet. On **SmartScreen** choose *More info → Run anyway*; if **Smart App Control** blocks it the app just won't start, so either turn Smart App Control off in *Windows Security → App & browser control*, or build RPMac yourself from source. Some antivirus tools also flag the bundled **InpOut32** driver, which is what talks to the SMC — normal for any fan-control utility. The full source is in this repo.
+
+Read-only and safe on non-Apple hardware. License: GPL-2.0-only.
+
+---
+
 ## RPMac v1.10.0
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**
