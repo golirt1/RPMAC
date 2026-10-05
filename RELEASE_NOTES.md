@@ -8,8 +8,13 @@ Settings has a new **Language** selector: **English** or **Italiano**. The whole
 
 The translations live in a single source file with no extra dependencies, so another language is one more dictionary and one more button. If you'd like RPMac in yours, pull requests are welcome.
 
+### Fixed
+
+- **RPMac recovers from an SMC that another program left stuck.** Another app talking to the SMC through Boot Camp's driver can leave it refusing every command until it is reset. RPMac used to handle that badly: started while the SMC was stuck, it stayed read-only even after the SMC came back; it burned CPU retrying against the dead SMC; and the status bar still said "Driver OK". Now it backs off instead of hammering the SMC, says "SMC not responding" in the status bar, re-checks every ~10 seconds, and unlocks itself (restarting quietly) once the SMC answers. If the SMC gets stuck while RPMac is already running, your fan settings are reapplied when it comes back. The re-checking only happens on a Mac; on any other PC RPMac still checks once at launch and then leaves the hardware alone. Contributed by @VladislavEkimtcov.
+
 ### New
 
+- **Two more Macs confirmed working:** a Mac mini Late 2014 (`Macmini7,1`) and a 13-inch MacBook Pro Late 2016 (`MacBookPro13,2`). Thanks to @heni0xyz and @MasterWolff for the reports.
 - **An installer script.** `installer/rpmac-setup.iss` builds an [Inno Setup](https://jrsoftware.org/isinfo.php) installer that starts RPMac with Windows and adds `smccore.exe` to PATH, for those who'd rather have it installed than portable. Contributed by @matthewyang204.
 
 ### Download
