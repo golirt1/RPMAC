@@ -327,6 +327,9 @@ namespace RPMac {
         string activePreset;        // name of the preset currently applied (null = none / custom)
         System.Windows.Forms.ToolStripMenuItem trayPresetsItem;  // tray "Presets" submenu
         volatile bool running = true;
+        TextBlock warnText;                // texto de la tarjeta "solo lectura": se refresca en cada reintento
+        bool relaunching = false;          // ya se pidio relanzar tras recuperar el SMC
+        const int REVALIDATE_MS = 10000;   // cada cuanto reintentar Validate() mientras estamos en solo lectura
         const double BAR_W = 505;   // ancho de la barra de RPM (columna de ventiladores)
         ComboBox trayModeCombo;     // "Show in tray" dropdown
         System.Drawing.Icon staticIcon;  // cached default "R" icon
@@ -437,7 +440,8 @@ namespace RPMac {
             if (!Smc.WritesAllowed) {
                 var warn = new StackPanel();
                 warn.Children.Add(new TextBlock { Text = I18n.T("⚠  Read-only mode"), FontSize = 14, FontWeight = FontWeights.Bold, Foreground = WARN });
-                warn.Children.Add(new TextBlock { Text = Smc.SafetyReason, Foreground = TXT, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) });
+                warnText = new TextBlock { Text = Smc.SafetyReason, Foreground = TXT, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) };
+                warn.Children.Add(warnText);
                 stack.Children.Add(Card(warn));
             }
 
@@ -461,7 +465,7 @@ namespace RPMac {
                 try { StartRefresh(); } catch (Exception ex) { App.LogError("StartRefresh", ex); }
                 try { Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerChange; } catch (Exception ex) { App.LogError("PowerHook", ex); }
                 try { if (Settings.Overlay) ShowOverlay(); } catch (Exception ex) { App.LogError("Overlay", ex); }
-                try { if (Settings.StartMinimized) HideToTray(); } catch (Exception ex) { App.LogError("HideToTray", ex); }
+                try { if (Settings.StartMinimized || App.StartHidden) HideToTray(); } catch (Exception ex) { App.LogError("HideToTray", ex); }
             };
             StateChanged += delegate { if (WindowState == WindowState.Minimized) HideToTray(); };
             Closing += delegate (object s2, System.ComponentModel.CancelEventArgs e2) { if (!quitting) { e2.Cancel = true; HideToTray(); } };
@@ -660,7 +664,11 @@ namespace RPMac {
         }
 
         bool Guard() {
-            if (Smc.WritesAllowed) return true;
+            if (Smc.WritesAllowed) {
+                if (!Smc.SmcUnresponsive) return true;
+                status.Text = I18n.T("SMC not responding — change not applied. Retrying automatically.");
+                return false;
+            }
             status.Text = I18n.T("Read-only on this hardware — ") + Smc.SafetyReason;
             return false;
         }
@@ -2720,12 +2728,57 @@ namespace RPMac {
             }) { IsBackground = true }.Start();
         }
 
+        // El SMC volvio a contestar despues de arrancar en solo lectura. La interfaz se construyo con
+        // lo que el SMC respondia entonces (cero ventiladores, sin sensores), asi que lo fiable es
+        // relanzar: es el mismo camino que el cambio de idioma. Si la ventana estaba oculta en la
+        // bandeja, la nueva instancia tambien arranca oculta.
+        void RelaunchAfterRecovery() {
+            Dispatcher.BeginInvoke((Action)delegate {
+                if (!running || quitting || relaunching) return;
+                relaunching = true;
+                try {
+                    string exe = System.Reflection.Assembly.GetExecutingAssembly().Location;
+                    bool shown = IsVisible && WindowState != WindowState.Minimized;
+                    System.Diagnostics.Process.Start(exe, App.RELAUNCH_ARG + (shown ? "" : " " + App.HIDDEN_ARG));
+                } catch (Exception ex) {
+                    // Sin relanzar seguimos en solo lectura, pero sin bucle de reintentos.
+                    App.LogError("RelaunchAfterRecovery", ex);
+                    return;
+                }
+                QuitApp();
+            });
+        }
+
         void StartRefresh() {
             new Thread(delegate () {
                 var sw = new System.Diagnostics.Stopwatch();
+                var sinceValidate = System.Diagnostics.Stopwatch.StartNew();
                 while (running) {
                     sw.Restart();
                     try {
+                        // Arrancamos en solo lectura porque el SMC no contestaba (otro programa lo
+                        // dejo atascado, o aun estaba despertando): seguir sondeando en vez de
+                        // quedarnos asi hasta reiniciar la app. Es la misma comprobacion de
+                        // seguridad de siempre; solo se repite, y solo en un Mac (ver RevalidationAllowed).
+                        if (!Smc.WritesAllowed && Smc.RevalidationAllowed && !relaunching && sinceValidate.ElapsedMilliseconds >= REVALIDATE_MS) {
+                            sinceValidate.Restart();
+                            bool ok = false;
+                            try { ok = Smc.Validate(); } catch (Exception ex) { App.LogError("Revalidate", ex); }
+                            if (ok) RelaunchAfterRecovery();
+                            else {
+                                string why = Smc.SafetyReason;
+                                Dispatcher.BeginInvoke((Action)delegate { if (warnText != null) warnText.Text = why; });
+                            }
+                        }
+                        // Un SMC ya validado que se atasco y volvio: puede haber perdido el modo
+                        // forzado de los ventiladores, igual que tras una suspension.
+                        if (Smc.WritesAllowed && Smc.TakeRecovered()) {
+                            Dispatcher.BeginInvoke((Action)delegate {
+                                if (!running) return;
+                                ApplySaved();
+                                status.Text = I18n.T("SMC recovered — settings reapplied · ") + DateTime.Now.ToString("HH:mm:ss");
+                            });
+                        }
                         var infos = Smc.GetFans();
                         var curated = new Dictionary<string, double>();
                         foreach (var k in new List<string>(curatedLabels.Keys)) curated[k] = Smc.ReadTemp(k);
@@ -2805,10 +2858,13 @@ namespace RPMac {
                             if (all != null) UpdateTemps(all, allLabels);
                             UpdateOverlay(infos, curated);
                             ApplyTrayMode(curated);
-                            statusDot.Background = Smc.WritesAllowed ? GOOD : WARN;
+                            statusDot.Background = (Smc.WritesAllowed && !Smc.SmcUnresponsive) ? GOOD : WARN;
                             double hot = double.NaN; string hotKey = null;
                             foreach (var kv in curated)
                                 if (!double.IsNaN(kv.Value) && (hotKey == null || kv.Value > hot)) { hot = kv.Value; hotKey = kv.Key; }
+                            if (Smc.SmcUnresponsive)
+                                status.Text = I18n.T("SMC not responding — retrying · ") + DateTime.Now.ToString("HH:mm:ss");
+                            else
                             status.Text = I18n.T("Driver OK · ")
                                 + fans.Count + (fans.Count == 1 ? I18n.T(" fan") : I18n.T(" fans"))
                                 + " · " + curatedLabels.Count + I18n.T(" sensors")
@@ -3252,12 +3308,15 @@ namespace RPMac {
     public class App {
         static Mutex mutex;
         internal const string RELAUNCH_ARG = "--relaunch";
+        internal const string HIDDEN_ARG = "--tray";   // relanzado en segundo plano: no mostrar la ventana
+        internal static bool StartHidden;
 
         [STAThread]
         public static void Main() {
             // Single instance: if RPMac is already running, ask that instance to surface its
             // window and exit — so a second launch never spawns a hidden duplicate fighting
             // over the SMC. (This is exactly what a user does when the window seems "gone".)
+            StartHidden = Array.IndexOf(Environment.GetCommandLineArgs(), HIDDEN_ARG) >= 0;
             bool createdNew;
             mutex = new Mutex(true, "RPMac_singleton_v1", out createdNew);
             if (!createdNew) {

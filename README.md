@@ -146,7 +146,7 @@ Beyond the machines above, RPMac has **not** been tested on other Mac models yet
 - **Fan control** is the most portable part (it uses standard keys), so it has the highest chance of working everywhere.
 - **Temperature sensor names vary by model**, so on other Macs some labeled sensors may be missing or wrong (use "Show all sensors (raw)" to see everything).
 - **T2 Macs (2018-2020) require PawnIO <=2.0.1 or >=2.3.0**, see why above in the support chart.
-- If the SMC does not respond with plausible values, RPMac **automatically stays read-only** and writes nothing.
+- If the SMC does not respond with plausible values, RPMac **automatically stays read-only** and writes nothing. On a Mac it keeps re-checking every ~10 seconds, so if another program left the SMC stuck at launch, RPMac unlocks itself (restarting quietly) as soon as the SMC answers again — no need to relaunch it by hand. While the SMC is not answering, the status bar says so and RPMac backs off instead of hammering it.
 
 ## Help us test it
 

@@ -207,6 +207,51 @@ namespace RPMac {
             return smcMutex;
         }
 
+        // ---- Resiliencia: SMC atascado por otro programa ----
+        // Otro programa (p. ej. un parpadeo del teclado a 30 escrituras/s por el driver de
+        // Boot Camp, que no conoce nuestro mutex) puede dejar una transaccion SMC a medias.
+        // El SMC queda con el buzon de entrada cerrado (IB_CLOSED) y no acepta NINGUN comando,
+        // de nadie, hasta que algo lo reinicie. Cada lectura tardaba ~0,26 s girando en
+        // espera activa, asi que un ciclo de refresco quemaba ~3 s de CPU martilleando un
+        // SMC muerto, y Validate() no se repetia nunca: la app quedaba en solo lectura
+        // aunque el SMC volviera.
+        //
+        // Solo cuenta como "atascado" no poder EMPEZAR una transaccion (ERR_UNREADY): una
+        // clave inexistente falla mas tarde y no debe frenar las demas lecturas.
+        const int ERR_UNREADY = -2;
+        const int BACKOFF_MIN_MS = 2000, BACKOFF_MAX_MS = 15000;
+        static int unreadyStreak;
+        static int retryAtTick;
+        static volatile bool smcUnready;
+        static bool recovered;   // bajo 'gate'
+
+        // true mientras el SMC no deja ni abrir una transaccion (ver arriba).
+        public static bool SmcUnresponsive { get { return smcUnready; } }
+
+        // true UNA vez cuando un SMC que estaba atascado vuelve a contestar. El SMC puede
+        // haber perdido el modo forzado de los ventiladores: quien llama debe reaplicarlo.
+        public static bool TakeRecovered() {
+            lock (gate) { bool r = recovered; recovered = false; return r; }
+        }
+
+        static bool InBackoff() {
+            return smcUnready && unchecked(retryAtTick - Environment.TickCount) > 0;
+        }
+        static void ResetBackoff() { unreadyStreak = 0; retryAtTick = Environment.TickCount; }
+
+        // Registra el resultado de una transaccion por puertos.
+        static void NoteTransport(int r) {
+            if (r == ERR_UNREADY) {
+                unreadyStreak++;
+                int delay = BACKOFF_MIN_MS << Math.Min(unreadyStreak - 1, 3);
+                if (delay > BACKOFF_MAX_MS) delay = BACKOFF_MAX_MS;
+                retryAtTick = unchecked(Environment.TickCount + delay);
+                smcUnready = true;
+            } else if (r == 0 && smcUnready) {
+                smcUnready = false; unreadyStreak = 0; recovered = true;
+            }
+        }
+
 
         // ---- I/O port protocol (pre-T2 Macs) ----
         static void Udelay(int us) {
@@ -236,8 +281,9 @@ namespace RPMac {
             return WaitStatus(0, BUSY);
         }
         static int PortReadSmc(byte cmd, byte[] key, byte[] buf, int len) {
-            int r = SmcSane(); if (r != 0) return r;
-            if (SendCommand(cmd) != 0 || SendArgument(key) != 0) return -1;
+            if (SmcSane() != 0) return ERR_UNREADY;
+            if (SendCommand(cmd) != 0) return ERR_UNREADY;
+            if (SendArgument(key) != 0) return -1;
             if (SendByte((byte)len, DATA) != 0) return -1;
             for (int i = 0; i < len; i++) {
                 if (WaitStatus(AWAITING | BUSY, AWAITING | BUSY) != 0) return -1;
@@ -247,8 +293,9 @@ namespace RPMac {
             return WaitStatus(0, BUSY);
         }
         static int PortWriteSmc(byte[] key, byte[] buf, int len) {
-            int r = SmcSane(); if (r != 0) return r;
-            if (SendCommand(WRITE_CMD) != 0 || SendArgument(key) != 0) return -1;
+            if (SmcSane() != 0) return ERR_UNREADY;
+            if (SendCommand(WRITE_CMD) != 0) return ERR_UNREADY;
+            if (SendArgument(key) != 0) return -1;
             if (SendByte((byte)len, DATA) != 0) return -1;
             for (int i = 0; i < len; i++) if (SendByte(buf[i], DATA) != 0) return -1;
             return WaitStatus(0, BUSY);
@@ -297,7 +344,11 @@ namespace RPMac {
                     // fallar esta lectura: la capa de arriba ya trata el fallo.
                     if (!held) return -1;
                 }
-                return useMmio ? MmioReadSmc(cmd, key, buf, len) : PortReadSmc(cmd, key, buf, len);
+                if (useMmio) return MmioReadSmc(cmd, key, buf, len);
+                if (InBackoff()) return ERR_UNREADY;   // no girar contra un SMC atascado
+                int r = PortReadSmc(cmd, key, buf, len);
+                NoteTransport(r);
+                return r;
             } finally {
                 if (held) { try { m.ReleaseMutex(); } catch { } }
             }
@@ -312,7 +363,11 @@ namespace RPMac {
                     catch { held = false; }
                     if (!held) return -1;
                 }
-                return useMmio ? MmioWriteSmc(key, buf, len) : PortWriteSmc(key, buf, len);
+                if (useMmio) return MmioWriteSmc(key, buf, len);
+                if (InBackoff()) return ERR_UNREADY;
+                int r = PortWriteSmc(key, buf, len);
+                NoteTransport(r);
+                return r;
             } finally {
                 if (held) { try { m.ReleaseMutex(); } catch { } }
             }
@@ -375,9 +430,17 @@ namespace RPMac {
         }
 
         // ---- Seguridad ----
-        public static bool WritesAllowed = false;   // por defecto NO se escribe hasta validar
+        public static volatile bool WritesAllowed = false;   // por defecto NO se escribe hasta validar
         public static string HardwareName = "";
         public static string SafetyReason = "Not validated yet.";
+
+        // Si merece la pena repetir Validate() estando en solo lectura. Solo cuando el registro
+        // dice que esto es un Mac: cada intento habla con los puertos 0x300/0x304, y en un PC
+        // que no es Apple esos puertos pueden ser de otro dispositivo. Ahi se prueba una vez
+        // al arrancar, como siempre. (Un Mac Pro 3,1 con el registro vacio tampoco reintenta:
+        // queda como antes, en solo lectura hasta reiniciar la app.)
+        public static volatile bool RevalidationAllowed = false;
+        const string RETRY_NOTE = " RPMac keeps checking every few seconds and unlocks by itself if the SMC starts answering.";
 
         // Valida que el hardware sea una Mac antes de permitir escribir. Si algo no
         // cuadra, deja la app en SOLO LECTURA (no escribe nada).
@@ -408,14 +471,19 @@ namespace RPMac {
             // Señal secundaria: el registro a veces confirma "Apple"/"Mac", pero no siempre.
             bool registrySaysApple = mfg.IndexOf("Apple", StringComparison.OrdinalIgnoreCase) >= 0
                                   || prod.IndexOf("Mac", StringComparison.OrdinalIgnoreCase) >= 0;
+            RevalidationAllowed = registrySaysApple;
+            string retryNote = registrySaysApple ? RETRY_NOTE : "";
 
             // Prueba primaria y autoritativa: el SMC de Apple debe responder coherentemente.
             lock (gate) {
+                // Validate es un sondeo explicito (arranque o reintento): que no lo frene
+                // el retroceso de las lecturas rutinarias.
+                ResetBackoff();
                 double n = ReadNum("FNum");
                 if (double.IsNaN(n) || n < 1 || n > 8) {
                     // T2 Macs (2018-2020): the T2 chip intercepts the legacy I/O-port protocol → NaN.
                     // Fall back to the PawnIO kernel module that reaches the SMC over MMIO.
-                    if (registrySaysApple && TryInitMmio()) {
+                    if (registrySaysApple && !useMmio && TryInitMmio()) {
                         n = ReadNum("FNum");
                     }
                     if (double.IsNaN(n) || n < 1 || n > 8) {
@@ -437,7 +505,7 @@ namespace RPMac {
                                    + (MmioError.Length > 0 ? "  [T2 module: " + MmioError + "]" : "");
                         else
                             t2hint = "";
-                        SafetyReason = "SMC did not return a valid fan count (got " + (double.IsNaN(n) ? "NaN" : n.ToString()) + "). Read-only for safety." + t2hint;
+                        SafetyReason = "SMC did not return a valid fan count (got " + (double.IsNaN(n) ? "NaN" : n.ToString()) + "). Read-only for safety." + t2hint + retryNote;
                         return false;
                     }
                 }
@@ -446,12 +514,14 @@ namespace RPMac {
                 if (double.IsNaN(ac) || double.IsNaN(mn) || double.IsNaN(mx) ||
                     mn < 0 || mx <= 0 || mx > 20000 || ac < 0 || ac > 20000) {
                     WritesAllowed = false;
-                    SafetyReason = string.Format("Fan readings are not plausible (ac={0:0}, mn={1:0}, mx={2:0}). Read-only for safety.", ac, mn, mx);
+                    SafetyReason = string.Format("Fan readings are not plausible (ac={0:0}, mn={1:0}, mx={2:0}). Read-only for safety.", ac, mn, mx) + retryNote;
                     return false;
                 }
             }
 
             // SMC coherente -> es hardware Apple, aunque el registro no lo confirme.
+            // Esta validacion ya cubre la recuperacion: que no dispare ademas un TakeRecovered.
+            lock (gate) { recovered = false; }
             WritesAllowed = true;
             string modeStr = useMmio ? " (T2 MMIO mode)" : "";
             SafetyReason = registrySaysApple
@@ -627,7 +697,7 @@ namespace RPMac {
                 for (long i = 0; i < count; i++) {
                     byte[] idx = { (byte)((i >> 24) & 0xFF), (byte)((i >> 16) & 0xFF), (byte)((i >> 8) & 0xFF), (byte)(i & 0xFF) };
                     byte[] nm = new byte[4];
-                    if (ReadSmc(GET_KEY_INDEX, idx, nm, 4) != 0) continue;
+                    if (ReadSmc(GET_KEY_INDEX, idx, nm, 4) != 0) { if (smcUnready) break; continue; }
                     string key = Encoding.ASCII.GetString(nm).Replace("\0", "");
                     if (key.Length < 1 || key[0] != 'T') continue;
                     int len; string type;
