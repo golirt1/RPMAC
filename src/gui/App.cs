@@ -465,7 +465,7 @@ namespace RPMac {
                 try { StartRefresh(); } catch (Exception ex) { App.LogError("StartRefresh", ex); }
                 try { Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerChange; } catch (Exception ex) { App.LogError("PowerHook", ex); }
                 try { if (Settings.Overlay) ShowOverlay(); } catch (Exception ex) { App.LogError("Overlay", ex); }
-                try { if (Settings.StartMinimized || App.StartHidden) HideToTray(); } catch (Exception ex) { App.LogError("HideToTray", ex); }
+                try { if ((Settings.StartMinimized && !App.Relaunched) || App.StartHidden) HideToTray(); } catch (Exception ex) { App.LogError("HideToTray", ex); }
             };
             StateChanged += delegate { if (WindowState == WindowState.Minimized) HideToTray(); };
             Closing += delegate (object s2, System.ComponentModel.CancelEventArgs e2) { if (!quitting) { e2.Cancel = true; HideToTray(); } };
@@ -3310,6 +3310,9 @@ namespace RPMac {
         internal const string RELAUNCH_ARG = "--relaunch";
         internal const string HIDDEN_ARG = "--tray";   // relanzado en segundo plano: no mostrar la ventana
         internal static bool StartHidden;
+        // Relanzado por la propia app (cambio de idioma o SMC recuperado). Entonces manda
+        // --tray, no "Start minimized": quien pulso Italiano tenia la ventana delante.
+        internal static bool Relaunched;
 
         [STAThread]
         public static void Main() {
@@ -3317,13 +3320,14 @@ namespace RPMac {
             // window and exit — so a second launch never spawns a hidden duplicate fighting
             // over the SMC. (This is exactly what a user does when the window seems "gone".)
             StartHidden = Array.IndexOf(Environment.GetCommandLineArgs(), HIDDEN_ARG) >= 0;
+            Relaunched = Array.IndexOf(Environment.GetCommandLineArgs(), RELAUNCH_ARG) >= 0;
             bool createdNew;
             mutex = new Mutex(true, "RPMac_singleton_v1", out createdNew);
             if (!createdNew) {
                 // Relaunched by a language switch: the old instance is on its way out, so wait
                 // for it to let go of the SMC and the mutex rather than surfacing its window.
                 bool took = false;
-                if (Array.IndexOf(Environment.GetCommandLineArgs(), RELAUNCH_ARG) >= 0) {
+                if (Relaunched) {
                     try { took = mutex.WaitOne(10000); } catch (AbandonedMutexException) { took = true; }
                 }
                 if (!took) {
