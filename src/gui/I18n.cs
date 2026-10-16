@@ -161,6 +161,9 @@ namespace RPMac {
             { "Type a name for the preset first.", "Digita prima un nome per il preset." },
             { "Saved preset: ", "Preset salvato: " },
             { "Deleted preset: ", "Preset eliminato: " },
+            { "Apply on startup", "Applica all'avvio" },
+            { "Apply on startup: ", "Applica all'avvio: " },
+            { "Preset applied when RPMac launches. None restores the last-used settings.", "Preset applicato all'avvio di RPMac. Nessuno ripristina le ultime impostazioni." },
 
             // ---- Themes ----
             { "Theme", "Tema" },
