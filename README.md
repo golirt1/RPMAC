@@ -131,6 +131,10 @@ RPMac has been verified on **seven machines**:
 - **MacBook Pro (16-inch, 2019)** - model identifier `MacBookPro16,1`
   - Intel Core i9-9880H, AMD Radeon Pro 5500M, dual fan — running **Windows Server 2025 single-booted**
   - All of the features pretty much work @matthewyang204
+- **MacBook Pro (15-inch, 2018)** — model identifier `MacBookPro15,1`
+  - Intel Core i9-8950HK, AMD Radeon Pro 560X, two fans — T2 chip present
+  - Temperature sensors read correctly; fan control works in all four modes (Auto / Max / Manual / Curve), custom curve behaves properly under load. No SMC read failures, no fan stuck at minimum
+  - Full run (sensor readout, mode switching, manual curve test) recorded on video and attached in the issue. Reported by @Kinkaliyov
 - **Mac mini (Late 2014)** — model identifier `Macmini7,1`
   - Intel Core i7-4578U, Intel Iris Graphics 5100, single fan — running **Windows 10 IoT Enterprise LTSC 2021**
   - Everything tried worked, including a custom temperature curve. Reported by @heni0xyz
