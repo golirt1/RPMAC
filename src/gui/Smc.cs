@@ -63,9 +63,9 @@ namespace RPMac {
         //
         // PawnIO's LoadBinary expects a blob shaped as [4-byte sig_len][sig][AMX].
         // A properly signed .bin already has that shape; a raw .amx does not. To be
-        // robust to either file, we try the file as-is first (signed .bin), and if that
-        // fails we retry it wrapped as [00 00 00 00][file] (unsigned .amx, which the
-        // PawnIO unrestricted edition accepts).
+        // robust to either file, we try the file as-is first (signed .bin), and only if
+        // it is a raw .amx do we retry it wrapped as [00 00 00 00][file] (an unsigned
+        // module, which only the PawnIO unrestricted edition accepts).
         static bool TryInitMmio() {
             try {
                 string dir = System.IO.Path.GetDirectoryName(
@@ -83,12 +83,16 @@ namespace RPMac {
                 if (TryLoadBlob(file)) return true;
                 string firstErr = MmioError;
 
-                // El segundo intento solo tiene sentido si el archivo es un .amx crudo.
-                // Nuestro .bin YA lleva la cabecera, y volver a envolverlo produce
-                // [0000][0000][AMX]: un blob corrupto cuyo error tapaba al de verdad.
-                bool alreadyWrapped = file.Length >= 4
-                                   && file[0] == 0 && file[1] == 0 && file[2] == 0 && file[3] == 0;
-                if (alreadyWrapped) {
+                // El segundo intento solo tiene sentido si el archivo es un .amx crudo, que
+                // empieza por su propio tamaño y la firma AMX (E1 F1). Todo lo demás ya trae
+                // la cabecera [sig_len][firma] —el .bin firmado (sig_len 512) o uno de prueba
+                // (sig_len 0)— y envolverlo otra vez da un blob corrupto cuyo error tapaba al de
+                // verdad: con PawnIO sin instalar repetía el aviso, y si el módulo rechazaba la
+                // máquina añadía un "err 87 ... damaged" falso.
+                bool rawAmx = file.Length >= 6
+                           && BitConverter.ToInt32(file, 0) == file.Length
+                           && file[4] == 0xE1 && file[5] == 0xF1;
+                if (!rawAmx) {
                     MmioError = firstErr;
                     return false;
                 }
