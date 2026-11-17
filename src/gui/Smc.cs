@@ -129,6 +129,12 @@ namespace RPMac {
             pawnHandle = h;
             useMmio = true;
             MmioError = "";
+            // Validate() sondea antes los puertos 0x300/0x304, y en un T2 esa sonda ni
+            // empieza: NoteTransport da el SMC por atascado. La ruta MMIO nunca pasa por
+            // NoteTransport, asi que nada lo desmarcaba y Guard() rechazaba cualquier
+            // cambio de ventilador con "SMC not responding" (#27). Ese estado es del
+            // transporte por puertos, que a partir de aqui ya no se usa.
+            smcUnready = false; unreadyStreak = 0; recovered = false;
             return true;
         }
 
