@@ -1,7 +1,9 @@
 RPMac - Quick start
 ===================
 
-1. Keep RPMac.exe, smccore.exe and inpout32.dll TOGETHER in the same folder.
+1. Keep every file from the zip (RPMac.exe, RPMac.exe.config, smccore.exe,
+   inpout32.dll, AppleT2Smc.bin) TOGETHER in the same folder.
+   On a T2 Mac (2018-2020), install PawnIO first - see "T2 Macs" below.
 2. Right-click RPMac.exe  ->  "Run as administrator"
    (administrator rights are required to access the Mac's hardware/SMC).
 3. Set each fan to Auto / Max / a custom RPM, or use "Curve" to ramp the fan
@@ -20,12 +22,16 @@ RPMac is available in English and Italian: Settings -> Language.
 
 T2 Macs (2018-2020)
 -------------------
-RPMac reaches the T2's SMC through a kernel module for PawnIO (pawnio.eu).
-Until that module is signed it has to be loaded by PawnIO's UNRESTRICTED
-edition - and note that the "unrestricted" option in the PawnIO 2.1.0 and
-2.2.0 installers ships a driver that still enforces signatures, so use 2.0.1.
-Keep AppleT2Smc.bin next to RPMac.exe. On any earlier Intel Mac none of this
-applies and RPMac works on its own.
+RPMac reaches the T2's SMC through a kernel module for PawnIO. The module
+(AppleT2Smc.bin, in this zip) is signed, so the regular PawnIO is all you need:
+  1. Install PawnIO from https://pawnio.eu
+  2. Keep AppleT2Smc.bin next to RPMac.exe.
+  3. Run RPMac.exe as administrator.
+No unrestricted edition or test-signing mode is needed any more. If you set
+those up for the earlier test builds, the module loads there too; to go back
+to a normal setup, uninstall that PawnIO, install the regular one, run
+"bcdedit /set testsigning off" as administrator and reboot.
+On any earlier Intel Mac none of this applies and RPMac works on its own.
 
 Worth turning on in Settings
 ----------------------------

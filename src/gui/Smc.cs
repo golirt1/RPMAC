@@ -146,7 +146,7 @@ namespace RPMac {
         static string LoadBinaryHint(int err) {
             switch (err) {
                 case 87:   // ERROR_INVALID_PARAMETER
-                    return "err 87 (STATUS_INVALID_PARAMETER — malformed blob, or a signature check on a build without the unsigned-module bypass)";
+                    return "err 87 (STATUS_INVALID_PARAMETER — AppleT2Smc.bin is damaged or is an old unsigned test build; use the one from the RPMac release)";
                 case 50:   // ERROR_NOT_SUPPORTED
                     return "err 50 (STATUS_NOT_SUPPORTED — the module loaded and its own hardware checks declined this machine)";
                 case 1:    // ERROR_INVALID_FUNCTION <- STATUS_UNSUCCESSFUL
@@ -494,9 +494,9 @@ namespace RPMac {
                     }
                     if (double.IsNaN(n) || n < 1 || n > 8) {
                         WritesAllowed = false;
-                        // No hay que insinuar que al usuario "le falta un archivo": el módulo
-                        // T2 no se distribuye porque todavía no está firmado, así que ir a
-                        // buscarlo es perder el tiempo. Mejor decir la verdad.
+                        // El módulo T2 ya está firmado (PawnIO.Modules 0.2.12) y va en el zip,
+                        // así que basta con el PawnIO normal: decir eso, y el motivo exacto
+                        // del fallo al cargarlo si lo hubo.
                         string t2hint;
                         if (registrySaysApple && useMmio)
                             t2hint = " The T2 module loaded but the SMC did not answer — the register layout on this model may differ. Please open an issue with your model identifier.";
@@ -504,8 +504,8 @@ namespace RPMac {
                             // No afirmar que es un T2: esto salta en CUALQUIER Mac cuyo SMC no
                             // conteste, incluidas las anteriores a 2018 con el SMC atascado, y
                             // decirle a alguien que su Mac Pro de 2013 "parece un T2" confunde.
-                            t2hint = " On T2 Macs (2018-2020) this is expected: the T2 chip intercepts the SMC, and reaching it needs a kernel module that is written but not yet signed"
-                                   + " — see github.com/golirt1/RPMAC for where that stands. On an older Mac it usually means the SMC stopped answering; a restart clears it."
+                            t2hint = " On a T2 Mac (2018-2020) the SMC is reached through PawnIO: install it from pawnio.eu and keep AppleT2Smc.bin next to RPMac.exe."
+                                   + " On an older Mac it usually means the SMC stopped answering; a restart clears it."
                                    // Sin esto, un fallo al cargar el modulo es indistinguible de
                                    // no haberlo intentado, y el probador no tiene nada que reportar.
                                    + (MmioError.Length > 0 ? "  [T2 module: " + MmioError + "]" : "");

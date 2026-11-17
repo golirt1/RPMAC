@@ -2,7 +2,7 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 
 #define MyAppName "RPMac"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.11.0"
 #define MyAppPublisher "Javier Cabrera (golirt1)"
 #define MyAppURL "https://www.github.com/golirt1/RPMAC"
 #define MyAppExeName "RPMac.exe"

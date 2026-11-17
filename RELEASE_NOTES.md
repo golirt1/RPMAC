@@ -1,3 +1,32 @@
+## RPMac v1.11.0
+
+**The other app capable of controlling fans on Intel Macs in Windows — for free.**
+
+### T2 Macs: just install PawnIO
+
+RPMac's T2 kernel module is now signed and published in [PawnIO.Modules 0.2.12](https://github.com/namazso/PawnIO.Modules/releases/tag/0.2.12) — thanks to @namazso for reviewing and signing it. No more unrestricted edition, test-signing mode or specific PawnIO version: on a 2018-2020 Mac, install the regular PawnIO from [pawnio.eu](https://pawnio.eu), keep `AppleT2Smc.bin` next to `RPMac.exe`, and run RPMac as administrator.
+
+If you set up the unrestricted edition for the earlier test builds, the signed module loads there too. To go back to a normal setup, uninstall that PawnIO, install the regular one, run `bcdedit /set testsigning off` and reboot.
+
+### Fixed
+
+- **Fan control did nothing on T2 Macs since 1.10.0.** Temperatures and fan speeds read fine, but every Max / Manual / Curve change was refused and the status bar kept saying "SMC not responding". The SMC-recovery logic from 1.10.0 took the T2's silent legacy ports for a stuck SMC and never let go once the T2 module had taken over. Diagnosed by @Dirtyx686, who also posted the fix (#27); confirmed by @eSavior on a MacBook Pro 16-inch 2019.
+- **The raw sensor list showed "—" for every sensor RPMac has a name for**, such as the T2 CPU cores, GPU memory, battery and NVMe. They now show their name and their reading.
+
+### New
+
+- **Apply a preset on startup.** On the Presets page, pick a preset for RPMac to apply every time it starts, or leave *None* to restore the last-used settings. Contributed by @VladislavEkimtcov.
+
+### Download
+Download `RPMac-v1.11.0-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
+Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe`, `inpout32.dll` and `AppleT2Smc.bin` together in the same folder. On a T2 Mac, install [PawnIO](https://pawnio.eu) first.
+
+> **If Windows blocks it:** RPMac isn't code-signed, so Windows doesn't recognise it yet. On **SmartScreen** choose *More info → Run anyway*; if **Smart App Control** blocks it the app just won't start, so either turn Smart App Control off in *Windows Security → App & browser control*, or build RPMac yourself from source. Some antivirus tools also flag the bundled **InpOut32** driver, which is what talks to the SMC — normal for any fan-control utility. The full source is in this repo.
+
+Read-only and safe on non-Apple hardware. License: GPL-2.0-only.
+
+---
+
 ## RPMac v1.10.1
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**

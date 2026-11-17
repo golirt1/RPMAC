@@ -33,3 +33,11 @@ InpOut32 / InpOutx64  -  user-mode bridge for low-level port I/O on Windows.
 
 The MIT license of InpOut32 is compatible with the GPL-2.0-only license of
 this project.
+
+AppleT2Smc  -  PawnIO kernel module RPMac uses to reach the SMC on T2 Macs.
+  Source: src/pawnio/AppleT2Smc.p, Copyright (C) 2026 golirt1.
+  Licensed under the GNU Lesser General Public License, version 2.1 or later.
+  AppleT2Smc.bin is the build signed by namazso and published in
+  PawnIO.Modules: https://github.com/namazso/PawnIO.Modules
+  It runs inside PawnIO (https://pawnio.eu), which is installed separately
+  and is not bundled with RPMac.

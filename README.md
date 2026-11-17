@@ -76,7 +76,7 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 - Remembers your settings and re-applies them (including after sleep/resume)
 - Command-line tool (`smccore.exe`) for scripting fan control
 - Safety first — read-only unless it confirms a genuine Apple Mac with a valid SMC; clamps RPM to the SMC's own min/max
-- Lightweight native UI — no runtime, no installer, nothing extra to install
+- Lightweight native UI — portable, no runtime to install (T2 Macs only need the free PawnIO driver)
 - Free and open source (GPL-2.0)
 
 ## Install
@@ -85,10 +85,11 @@ The benefit of the installer version is that it automatically launches with the 
 is harder to accidentally delete.
 
 ### Portable Instructions
-1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.10.1-windows.zip` (under **Assets**).
-2. **Unzip it** to any folder you like (e.g. your Desktop). Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe` and `inpout32.dll` **together in the same folder**.
-3. **Right-click `RPMac.exe` → "Run as administrator"** (administrator rights are required to access the Mac's hardware/SMC).
-4. Set each fan to **Auto / Max / a custom RPM**. Temperatures update live.
+1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.11.0-windows.zip` (under **Assets**).
+2. **Unzip it** to any folder you like (e.g. your Desktop). Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe`, `inpout32.dll` and `AppleT2Smc.bin` **together in the same folder**.
+3. **T2 Macs only (2018-2020):** install [PawnIO](https://pawnio.eu) first — see [T2 Macs](#t2-macs-2018-2020) below.
+4. **Right-click `RPMac.exe` → "Run as administrator"** (administrator rights are required to access the Mac's hardware/SMC).
+5. Set each fan to **Auto / Max / a custom RPM**. Temperatures update live.
 
 ### Installer instructions
 1. Go to the releases as documented above in the portable instructions.
@@ -96,6 +97,15 @@ is harder to accidentally delete.
 3. Run it and follow the instructions; it should also automatically install the application to the system.
 4. If the app doesn't immediately start, open it up from the start menu.
 5. Use it in the same way as the portable version above.
+
+### T2 Macs (2018-2020)
+On T2 Macs the T2 chip hides the SMC from the usual I/O ports, so RPMac reaches it through its own small kernel module for [PawnIO](https://pawnio.eu). That module (`AppleT2Smc.bin`, included in the zip) is signed and published in [PawnIO.Modules 0.2.12](https://github.com/namazso/PawnIO.Modules/releases/tag/0.2.12), so the regular PawnIO is all you need:
+
+1. Install PawnIO from [pawnio.eu](https://pawnio.eu).
+2. Keep `AppleT2Smc.bin` next to `RPMac.exe`.
+3. Run RPMac as administrator. Fans and temperatures show up just like on any other Mac.
+
+No unrestricted edition, no test-signing mode and no specific PawnIO version are needed any more. If you set those up for the earlier test builds, the signed module loads there too; to go back to a normal setup, uninstall that PawnIO, install the regular one, run `bcdedit /set testsigning off` in an administrator terminal and reboot.
 
 > **If Windows blocks it:** RPMac is a small open-source app and isn't code-signed (a certificate costs a few hundred dollars a year), so Windows doesn't recognise it yet.
 > - **SmartScreen** ("Windows protected your PC") → **More info → Run anyway**.
@@ -110,12 +120,12 @@ To **uninstall**, just delete the folder. Settings live in `%APPDATA%\RPMac`; if
 | Hardware | Status |
 |---|---|
 | Intel Macs (up to 2017) on Boot Camp | Should work (confirmed on MacPro6,1, MacPro3,1, iMac17,1, Macmini3,1, Macmini7,1 and MacBookPro13,2) |
-| Intel Macs with T2 (2018-2020) | **Requires PawnIO Unrestricted <=2.0.1 or >= 2.3.0** — the T2 uses a different SMC interface and needs PawnIO, but the driver has issues involving PawnIO 2.1.0 & 2.2.0 Unrestricted not actually disabling verification |
+| Intel Macs with T2 (2018-2020) | Works — install [PawnIO](https://pawnio.eu) first (confirmed on MacBookPro15,1 and MacBookPro16,1; see [T2 Macs](#t2-macs-2018-2020)) |
 | Apple Silicon (M1+) | Not possible (no Boot Camp) |
 | Non-Apple PCs | Read-only (writes are blocked) |
 
 ### Tested hardware
-RPMac has been verified on **seven machines**:
+RPMac has been verified on **eight machines**:
 
 - **Mac Pro (Late 2013)** — model identifier `MacPro6,1`
   - Intel Xeon CPU, dual AMD FirePro GPUs, single centrifugal system fan
@@ -142,14 +152,14 @@ RPMac has been verified on **seven machines**:
   - Intel Core i5-6267U, Intel Iris Graphics 550, two fans — running **Windows 10 Home**
   - Everything worked as intended, with no errors; the first confirmed MacBook without a T2 chip. Reported by @MasterWolff
 
-On all seven machines, reading sensors and controlling the fans (Auto / Max / custom RPM) work correctly.
+On all eight machines, reading sensors and controlling the fans (Auto / Max / custom RPM) work correctly.
 
 ### Other Intel Macs (untested, but expected to work)
 Beyond the machines above, RPMac has **not** been tested on other Mac models yet. That said, it is built on the **standard Apple SMC interface that is common to virtually all Intel Macs**, and the core auto-detects the number of fans and each key's data format. So it *should* work on most Intel Macs in Boot Camp, with these caveats:
 
 - **Fan control** is the most portable part (it uses standard keys), so it has the highest chance of working everywhere.
 - **Temperature sensor names vary by model**, so on other Macs some labeled sensors may be missing or wrong (use "Show all sensors (raw)" to see everything).
-- **T2 Macs (2018-2020) require PawnIO <=2.0.1 or >=2.3.0**, see why above in the support chart.
+- **T2 Macs (2018-2020) need [PawnIO](https://pawnio.eu)** — see [T2 Macs](#t2-macs-2018-2020).
 - If the SMC does not respond with plausible values, RPMac **automatically stays read-only** and writes nothing. On a Mac it keeps re-checking every ~10 seconds, so if another program left the SMC stuck at launch, RPMac unlocks itself (restarting quietly) as soon as the SMC answers again — no need to relaunch it by hand. While the SMC is not answering, the status bar says so and RPMac backs off instead of hammering it.
 
 ## Help us test it
@@ -202,9 +212,12 @@ min/max. Like the GUI, it stays read-only and writes nothing on non-Apple hardwa
 ## How it works
 RPMac uses the public Apple SMC protocol (the same one documented in the Linux `applesmc` driver) over the SMC's I/O ports (`DATA = 0x300`, `CMD = 0x304`), via the InpOut32 ring-0 I/O bridge. It reads and writes standard SMC keys (`FNum`, `F<n>Tg`, `FS! `, temperature `T...` keys) and auto-detects each key's data type (`fpe2`, `flt`, `ui*`, `sp*`, ...).
 
+On T2 Macs the same keys go through the SMC's MMIO window instead, handled by RPMac's own kernel module for [PawnIO](https://pawnio.eu) ([`src/pawnio/AppleT2Smc.p`](src/pawnio/AppleT2Smc.p)). The module only exposes SMC reads and writes, never raw memory, and only lets fan-control keys be written.
+
 ## Requirements
 - An Intel Mac running Windows (Boot Camp)
 - Administrator rights (required for hardware I/O)
+- On T2 Macs (2018-2020): [PawnIO](https://pawnio.eu)
 
 ## Build
 Compiles with the .NET Framework C# compiler already present on Windows — no Visual Studio needed.
@@ -213,8 +226,8 @@ The easiest way is the included **`build.bat`** (from the repo root):
 ```
 build.bat
 ```
-It compiles `RPMac.exe` and `smccore.exe` into `build\` and copies `inpout32.dll` and
-`RPMac.exe.config` next to them.
+It compiles `RPMac.exe` and `smccore.exe` into `build\` and copies `inpout32.dll`,
+`RPMac.exe.config` and the signed `AppleT2Smc.bin` next to them.
 
 To compile `RPMac.exe` by hand instead, from the repo root:
 ```
@@ -232,19 +245,24 @@ csc /noconfig /target:winexe /platform:x86 ^
     /reference:WPF\PresentationFramework.dll ^
     src\gui\Smc.cs src\gui\I18n.cs src\gui\App.cs
 ```
-`csc.exe` lives in `%WINDIR%\Microsoft.NET\Framework\v4.0.30319`. Keep `inpout32.dll` and
-`RPMac.exe.config` next to `RPMac.exe` when you run it. (`System.Windows.Forms` and
-`System.Drawing` are required — the tray icon uses them.)
+`csc.exe` lives in `%WINDIR%\Microsoft.NET\Framework\v4.0.30319`. Keep `inpout32.dll`,
+`RPMac.exe.config` and (for T2 Macs) `dist\AppleT2Smc.bin` next to `RPMac.exe` when you run it.
+(`System.Windows.Forms` and `System.Drawing` are required — the tray icon uses them.)
+
+`dist\AppleT2Smc.bin` is the signed build of `src\pawnio\AppleT2Smc.p` published in
+[PawnIO.Modules](https://github.com/namazso/PawnIO.Modules). The regular PawnIO only loads modules
+signed by its author, so a module you compile yourself needs PawnIO's unrestricted edition.
 
 ## License
 **GPL-2.0-only.** See `LICENSE`.
 
-RPMac's SMC code is derived from the Linux `applesmc` driver and smcFanControl — see `NOTICE` for credits. InpOut32 is bundled under the MIT license.
+RPMac's SMC code is derived from the Linux `applesmc` driver and smcFanControl — see `NOTICE` for credits. InpOut32 is bundled under the MIT license. The T2 kernel module (`src/pawnio/AppleT2Smc.p`) is LGPL-2.1-or-later, like the rest of PawnIO.Modules; `AppleT2Smc.bin` is the signed build published there.
 
 ## Credits
 - `applesmc.c` (Linux): Nicolas Boichat, Henrik Rydberg
 - smcFanControl: Hendrik Holtmann
 - InpOut32: Phillip Gibbons
+- PawnIO: namazso — who also reviewed and signed the T2 module
 
 ## Disclaimer — no warranty
 
