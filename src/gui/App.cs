@@ -1731,7 +1731,9 @@ namespace RPMac {
             // Enumerar todo el espacio de claves del SMC es lento, así que se hace una sola
             // vez y se guarda: al rehacer la página (al nombrar un sensor) se reutiliza.
             if (rawKeys.Count > 0) {
-                foreach (var k in rawKeys) allPanel.Children.Add(TempRow(k, Smc.TempName(k), allLabels, 200));
+                // TempRow(nombre visible, clave SMC): el refresco lee las claves de allLabels,
+                // asi que la clave tiene que ser la del SMC, no el nombre legible.
+                foreach (var k in rawKeys) allPanel.Children.Add(TempRow(Smc.TempName(k), k, allLabels, 200));
                 FillCustomKeyCombo();
                 return;
             }
@@ -1741,8 +1743,7 @@ namespace RPMac {
                 Dispatcher.Invoke((Action)delegate {
                     allPanel.Children.Clear();
                     rawKeys.Clear();
-                    foreach (var k in keys) { rawKeys.Add(k); allPanel.Children.Add(TempRow(k, Smc.TempName(k), allLabels, 200));
-                    }
+                    foreach (var k in keys) { rawKeys.Add(k); allPanel.Children.Add(TempRow(Smc.TempName(k), k, allLabels, 200)); }
                     FillCustomKeyCombo();
                 });
             }) { IsBackground = true }.Start();
