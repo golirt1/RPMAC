@@ -153,8 +153,12 @@ namespace RPMac {
                     return "err 87 (STATUS_INVALID_PARAMETER — AppleT2Smc.bin is damaged or is an old unsigned test build; use the one from the RPMac release)";
                 case 50:   // ERROR_NOT_SUPPORTED
                     return "err 50 (STATUS_NOT_SUPPORTED — the module loaded and its own hardware checks declined this machine)";
-                case 1:    // ERROR_INVALID_FUNCTION <- STATUS_UNSUCCESSFUL
-                    return "err 1 (the AMX itself failed to load — wrong or truncated module file)";
+                case 31:   // ERROR_GEN_FAILURE <- STATUS_UNSUCCESSFUL: el AMX no arrancó
+                    return "err 31 (the module could not start in this PawnIO, which is usually too old: update PawnIO from pawnio.eu)";
+                case 1450: // ERROR_NO_SYSTEM_RESOURCES <- STATUS_INSUFFICIENT_RESOURCES
+                    return "err 1450 (the module could not map the SMC window on this Mac)";
+                case 1:    // ERROR_INVALID_FUNCTION <- STATUS_NOT_IMPLEMENTED: este PawnIO no conoce la petición
+                    return "err 1 (this PawnIO doesn't know the request: update PawnIO from pawnio.eu)";
                 default:
                     return "err " + err;
             }

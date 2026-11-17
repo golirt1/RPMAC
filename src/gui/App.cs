@@ -141,7 +141,9 @@ namespace RPMac {
             var list = new List<string[]>(CURATED);
             foreach (var kv in Settings.CustomSensors) {
                 bool known = false;
-                foreach (var c in SENSORS) if (c[0] == kv.Key) { known = true; break; }
+                // Contra CURATED, no contra SENSORS: SENSORS ya incluye los nombrados antes, y
+                // compararlos consigo mismos los daba por "conocidos" y los quitaba de la lista.
+                foreach (var c in CURATED) if (c[0] == kv.Key) { known = true; break; }
                 if (!known) list.Add(new[] { kv.Key, kv.Value });
             }
             SENSORS = list.ToArray();
@@ -1653,7 +1655,9 @@ namespace RPMac {
             string name = (customNameBox.Text ?? "").Trim();
             if (name.Length == 0) { status.Text = I18n.T("Give the sensor a name first."); return; }
             double v = Smc.ReadTemp(key);
-            if (double.IsNaN(v)) { status.Text = key.Trim() + I18n.T(" isn't reading a temperature right now."); return; }
+            // Mismo rango que el resto de la app (5-120 °C): fuera de él el sensor no aparecería en
+            // ninguna parte y el "Added" sería mentira.
+            if (double.IsNaN(v) || v < 5 || v > 120) { status.Text = key.Trim() + I18n.T(" isn't reading a temperature right now."); return; }
             Settings.CustomSensors[key] = name;
             Settings.Save();
             customNameBox.Text = "";
@@ -2356,7 +2360,7 @@ namespace RPMac {
 
                         // Clamp to displayable range
                         if (temp < 0) temp = 0;
-                        if (temp > 199) temp = 199;
+                        if (temp > 999) temp = 999;   // en °F se pasa de 199 a partir de 93 °C
                         string digits = temp.ToString();
 
                         using (var br = new System.Drawing.SolidBrush(TrayDigitColor(Settings.Theme))) {
@@ -2526,7 +2530,9 @@ namespace RPMac {
                         if (tmax > tmin) pts = new List<CurvePt> { new CurvePt(tmin, rmin), new CurvePt(tmax, rmax) };
                     }
                     if (pts == null) return;
-                    f.CurveSensorKey = s[2];
+                    // Un preset guardado con la pestaña Curve sin aplicar trae la clave vacía: con
+                    // ella el bucle leía NaN y el ventilador no se controlaba aunque pusiera "Curve".
+                    f.CurveSensorKey = string.IsNullOrEmpty(s[2]) ? HIGHEST_SENSOR : s[2];
                     f.Pts = pts; f.SyncFlat();
                     RenderCurve(f);
                     foreach (var obj in f.CurveSensor.Items) {
@@ -2544,7 +2550,17 @@ namespace RPMac {
             switch (f.CurMode) {
                 case "max":    return new[] { "max", "0" };
                 case "manual": return new[] { "manual", ((int)f.Slider.Value).ToString() };
-                case "curve":  return new[] { "curve", "0", f.CurveSensorKey ?? "", PointsToText(f) };
+                case "curve": {
+                    // Sin "Apply curve" no hay clave aplicada: guardar la que muestra el desplegable
+                    // (o "Highest temp") en vez de una vacía que dejaría el ventilador sin controlar.
+                    string k = f.CurveSensorKey;
+                    if (string.IsNullOrEmpty(k)) {
+                        var it = (f.CurveSensor == null) ? null : f.CurveSensor.SelectedItem as ComboBoxItem;
+                        k = (it == null) ? null : it.Tag as string;
+                        if (string.IsNullOrEmpty(k)) k = HIGHEST_SENSOR;
+                    }
+                    return new[] { "curve", "0", k, PointsToText(f) };
+                }
                 default:       return new[] { "auto", "0" };
             }
         }

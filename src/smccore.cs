@@ -250,18 +250,35 @@ class SmcCore {
         P("FS!  -> " + (on ? "forzado" : "auto") + "  (mask escrita)  ret=" + r);
     }
 
+    // Recorta un objetivo al rango que el propio SMC declara para ese ventilador. Sin rango legible
+    // no se escribe nada: el SMC guarda cualquier objetivo, asi que uno sin recortar puede pasarse
+    // del maximo, y uno negativo da la vuelta (fpe2: -1 -> 0xFFFC -> 16383 RPM).
+    static bool ClampToFan(string p, ref double target) {
+        double mn = ReadNum(p + "Mn"), mx = ReadNum(p + "Mx");
+        if (double.IsNaN(mn) || double.IsNaN(mx) || mn < 0 || mx <= 0) return false;
+        if (target < mn) target = mn;
+        if (target > mx) target = mx;
+        return true;
+    }
+
     static void SetAll(double rpm, bool toMax) {
         int n = FanCount();
-        SetForcedAll(true);
+        // Calcular todos los objetivos ANTES de forzar nada: si uno no se puede, no se toca ninguno.
+        var targets = new double[n];
+        var lens = new int[n];
+        var types = new string[n];
         for (int i = 0; i < n; i++) {
             string p = "F" + i;
-            int len; string type;
-            if (!KeyInfo(p + "Tg", out len, out type)) continue;
+            if (!KeyInfo(p + "Tg", out lens[i], out types[i])) { P("Fan " + i + ": sin clave Tg; no se cambia nada"); return; }
             double target = toMax ? ReadNum(p + "Mx") : rpm;
-            if (double.IsNaN(target)) continue;
-            byte[] b = Encode(type, len, target);
-            int r = WriteSmc(K(p + "Tg"), b, len);
-            P(string.Format("  Fan {0}: objetivo -> {1:0} RPM ({2})  ret={3}", i, target, type.TrimEnd('\0', ' '), r));
+            if (double.IsNaN(target) || (!toMax && !ClampToFan(p, ref target))) { P("Fan " + i + ": rango min/max ilegible; no se cambia nada"); return; }
+            targets[i] = target;
+        }
+        SetForcedAll(true);
+        for (int i = 0; i < n; i++) {
+            byte[] b = Encode(types[i], lens[i], targets[i]);
+            int r = WriteSmc(K("F" + i + "Tg"), b, lens[i]);
+            P(string.Format("  Fan {0}: objetivo -> {1:0} RPM ({2})  ret={3}", i, targets[i], types[i].TrimEnd('\0', ' '), r));
         }
     }
 
@@ -288,19 +305,25 @@ class SmcCore {
     static void SetOne(int fan, double rpm, bool toMax) {
         if (!ValidFan(fan)) return;
         string p = "F" + fan;
-        SetForcedOne(fan, true);
         int len; string type;
         if (!KeyInfo(p + "Tg", out len, out type)) { P("Fan " + fan + ": sin clave Tg"); return; }
         double target = toMax ? ReadNum(p + "Mx") : rpm;
         if (double.IsNaN(target)) { P("Fan " + fan + ": valor/Mx invalido"); return; }
-        if (!toMax) {   // recortar al rango real del SMC
-            double mn = ReadNum(p + "Mn"), mx = ReadNum(p + "Mx");
-            if (!double.IsNaN(mn) && target < mn) target = mn;
-            if (!double.IsNaN(mx) && target > mx) target = mx;
-        }
+        // recortar al rango real del SMC; sin rango legible, no se toca el ventilador
+        if (!toMax && !ClampToFan(p, ref target)) { P("Fan " + fan + ": rango min/max ilegible; no se cambia nada"); return; }
+        SetForcedOne(fan, true);
         byte[] b = Encode(type, len, target);
         int r = WriteSmc(K(p + "Tg"), b, len);
         P(string.Format("Fan {0}: objetivo -> {1:0} RPM ({2})  ret={3}", fan, target, type.TrimEnd('\0', ' '), r));
+    }
+
+    // "2000" o "2000.5" en cualquier idioma de Windows; nada de negativos, NaN ni infinitos.
+    static double ParseRpm(string s) {
+        double v;
+        if (!double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v)
+            || double.IsNaN(v) || double.IsInfinity(v) || v <= 0)
+            throw new ArgumentException("RPM no valido: " + s);
+        return v;
     }
 
     static void DumpKey(string key) {
@@ -330,8 +353,8 @@ class SmcCore {
                     else { P("Devolviendo TODOS los ventiladores a AUTOMATICO..."); SetForcedAll(false); }
                     break;
                 case "set":
-                    if (args.Length > 2)      { int f = int.Parse(args[1]); double rpm = double.Parse(args[2]); P("Fan " + f + " a " + rpm + " RPM..."); SetOne(f, rpm, false); }
-                    else if (args.Length > 1) { double rpm = double.Parse(args[1]); P("Fijando TODOS a " + rpm + " RPM..."); SetAll(rpm, false); }
+                    if (args.Length > 2)      { int f = int.Parse(args[1]); double rpm = ParseRpm(args[2]); P("Fan " + f + " a " + rpm + " RPM..."); SetOne(f, rpm, false); }
+                    else if (args.Length > 1) { double rpm = ParseRpm(args[1]); P("Fijando TODOS a " + rpm + " RPM..."); SetAll(rpm, false); }
                     else P("Uso: smccore.exe set [fan] <rpm>");
                     break;
                 case "key":

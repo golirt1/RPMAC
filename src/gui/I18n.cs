@@ -163,7 +163,7 @@ namespace RPMac {
             { "Deleted preset: ", "Preset eliminato: " },
             { "Apply on startup", "Applica all'avvio" },
             { "Apply on startup: ", "Applica all'avvio: " },
-            { "Preset applied when RPMac launches. None restores the last-used settings.", "Preset applicato all'avvio di RPMac. Nessuno ripristina le ultime impostazioni." },
+            { "Preset applied when RPMac launches. None restores the last-used settings.", "Preset applicato all'avvio di RPMac. Con «Niente» vengono ripristinate le ultime impostazioni." },
 
             // ---- Themes ----
             { "Theme", "Tema" },
