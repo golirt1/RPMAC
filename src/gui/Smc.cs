@@ -57,6 +57,9 @@ namespace RPMac {
         static IntPtr pawnHandle = IntPtr.Zero;
         public static bool MmioActive { get { return useMmio; } }
         public static string MmioError = "";   // diagnostic detail when TryInitMmio fails
+        // true cuando el ultimo intento no encontro el dispositivo de PawnIO (CreateFile err 2/3):
+        // PawnIO no esta instalado o no arranco. Lo usa la interfaz para ofrecer instalarlo.
+        public static bool PawnIoMissing = false;
 
         // Open PawnIO and load our T2 SMC module. Returns true on success; on failure
         // MmioError explains exactly which step failed so the UI can guide the user.
@@ -67,6 +70,7 @@ namespace RPMac {
         // it is a raw .amx do we retry it wrapped as [00 00 00 00][file] (an unsigned
         // module, which only the PawnIO unrestricted edition accepts).
         static bool TryInitMmio() {
+            PawnIoMissing = false;
             try {
                 string dir = System.IO.Path.GetDirectoryName(
                     System.Reflection.Assembly.GetExecutingAssembly().Location);
@@ -118,7 +122,15 @@ namespace RPMac {
             IntPtr h = CreateFile(PAWNIO_DEVICE, GENERIC_RW, FILE_SHARE_RW, IntPtr.Zero,
                                   OPEN_EXISTING, 0, IntPtr.Zero);
             if (h == IntPtr.Zero || h == (IntPtr)(-1)) {
-                MmioError = "PawnIO driver not reachable (CreateFile err " + Marshal.GetLastWin32Error() + "). Install PawnIO from pawnio.eu and reboot.";
+                int err = Marshal.GetLastWin32Error();
+                PawnIoMissing = (err == 2 || err == 3);   // ERROR_FILE_NOT_FOUND / ERROR_PATH_NOT_FOUND
+                // Solo el hecho: en un T2 la tarjeta ofrece instalarlo, y PawnIO no pide reiniciar.
+                if (PawnIoMissing)
+                    MmioError = "PawnIO isn't installed or isn't running (CreateFile err " + err + ").";
+                else if (err == 5)
+                    MmioError = "PawnIO refused access (CreateFile err 5): run RPMac as administrator.";
+                else
+                    MmioError = "PawnIO driver not reachable (CreateFile err " + err + ").";
                 return false;
             }
             uint ret;
@@ -456,6 +468,15 @@ namespace RPMac {
         public static volatile bool RevalidationAllowed = false;
         const string RETRY_NOTE = " RPMac keeps checking every few seconds and unlocks by itself if the SMC starts answering.";
 
+        // Modelos con chip T2 (2018-2020), por el identificador que Boot Camp pone en
+        // SystemProductName. Solo orienta al usuario (p. ej. ofrecer instalar PawnIO): quien
+        // decide si se usa MMIO sigue siendo el propio SMC en Validate().
+        static readonly string[] T2_MODEL_PREFIXES = {
+            "MacBookPro15,", "MacBookPro16,", "MacBookAir8,", "MacBookAir9,",
+            "Macmini8,", "iMac20,", "iMacPro1,", "MacPro7,"
+        };
+        public static bool IsT2Model = false;
+
         // Valida que el hardware sea una Mac antes de permitir escribir. Si algo no
         // cuadra, deja la app en SOLO LECTURA (no escribe nada).
         //
@@ -481,6 +502,10 @@ namespace RPMac {
             } catch { }
 
             HardwareName = (mfg + " " + prod).Trim();
+            bool t2 = false;
+            foreach (string pre in T2_MODEL_PREFIXES)
+                if (prod.StartsWith(pre, StringComparison.OrdinalIgnoreCase)) { t2 = true; break; }
+            IsT2Model = t2;
 
             // Señal secundaria: el registro a veces confirma "Apple"/"Mac", pero no siempre.
             bool registrySaysApple = mfg.IndexOf("Apple", StringComparison.OrdinalIgnoreCase) >= 0
@@ -497,7 +522,11 @@ namespace RPMac {
                 if (double.IsNaN(n) || n < 1 || n > 8) {
                     // T2 Macs (2018-2020): the T2 chip intercepts the legacy I/O-port protocol → NaN.
                     // Fall back to the PawnIO kernel module that reaches the SMC over MMIO.
-                    if (registrySaysApple && !useMmio && TryInitMmio()) {
+                    // Solo en modelos T2 (o si Boot Camp no dice el modelo): ahora que el módulo está
+                    // firmado, cargarlo en un Mac anterior con el SMC atascado lo haría mapear y leer
+                    // 0xFE0B0000 —que ahí no es el SMC— en cada reintento, cada 10 s.
+                    bool t2Candidate = IsT2Model || prod.Trim().Length == 0;
+                    if (registrySaysApple && t2Candidate && !useMmio && TryInitMmio()) {
                         n = ReadNum("FNum");
                     }
                     if (double.IsNaN(n) || n < 1 || n > 8) {
@@ -508,15 +537,18 @@ namespace RPMac {
                         string t2hint;
                         if (registrySaysApple && useMmio)
                             t2hint = " The T2 module loaded but the SMC did not answer — the register layout on this model may differ. Please open an issue with your model identifier.";
-                        else if (registrySaysApple)
-                            // No afirmar que es un T2: esto salta en CUALQUIER Mac cuyo SMC no
-                            // conteste, incluidas las anteriores a 2018 con el SMC atascado, y
-                            // decirle a alguien que su Mac Pro de 2013 "parece un T2" confunde.
+                        else if (registrySaysApple && IsT2Model && PawnIoMissing)
+                            // La tarjeta trae justo debajo el botón para instalarlo (o el motivo por el
+                            // que no se puede): aquí no hace falta mandar a nadie a pawnio.eu.
+                            t2hint = " This Mac has a T2 chip, and RPMac reaches its SMC through PawnIO, which isn't installed or running yet.";
+                        else if (registrySaysApple && t2Candidate)
                             t2hint = " On a T2 Mac (2018-2020) the SMC is reached through PawnIO: install it from pawnio.eu and keep AppleT2Smc.bin next to RPMac.exe."
-                                   + " On an older Mac it usually means the SMC stopped answering; a restart clears it."
                                    // Sin esto, un fallo al cargar el modulo es indistinguible de
                                    // no haberlo intentado, y el probador no tiene nada que reportar.
                                    + (MmioError.Length > 0 ? "  [T2 module: " + MmioError + "]" : "");
+                        else if (registrySaysApple)
+                            // Un Mac anterior al T2 cuyo SMC no contesta: no hablarle de PawnIO.
+                            t2hint = " The SMC stopped answering, usually because another program left it stuck; a restart clears it.";
                         else
                             t2hint = "";
                         SafetyReason = "SMC did not return a valid fan count (got " + (double.IsNaN(n) ? "NaN" : n.ToString()) + "). Read-only for safety." + t2hint + retryNote;

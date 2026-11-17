@@ -69,8 +69,46 @@ if not exist "%ROOT%build\AppleT2Smc.bin" (
   exit /b 1
 )
 
+REM The official PawnIO installer (namazso, redistributed unmodified). On a T2 Mac without
+REM PawnIO, RPMac offers to run it. It isn't kept in git: fetch the pinned version once and
+REM make sure it is exactly that file. Keep the version and hash in sync with App.cs and the .iss.
+set "PAWNIO_URL=https://github.com/namazso/PawnIO.Setup/releases/download/2.2.0/PawnIO_setup.exe"
+set "PAWNIO_SHA256=1f519a22e47187f70a1379a48ca604981c4fcf694f4e65b734aaa74a9fba3032"
+set "PAWNIO_FILE=%ROOT%dist\PawnIO_setup.exe"
+call :pawnio_ok
+if errorlevel 1 (
+  REM Missing or not the pinned file: download it. It lands in a .part first, so a broken
+  REM download never replaces anything, and a correct file placed by hand is never deleted.
+  echo Downloading PawnIO_setup.exe 2.2.0...
+  curl -fsSL -o "%PAWNIO_FILE%.part" "%PAWNIO_URL%" && move /y "%PAWNIO_FILE%.part" "%PAWNIO_FILE%" >nul
+  if exist "%PAWNIO_FILE%.part" del /f /q "%PAWNIO_FILE%.part" >nul 2>&1
+  call :pawnio_ok
+)
+if errorlevel 1 (
+  echo BUILD FAILED: dist\PawnIO_setup.exe is missing or is not the official PawnIO 2.2.0 installer.
+  echo Download it from %PAWNIO_URL%
+  echo into dist\ and run build.bat again.
+  exit /b 1
+)
+copy /y "%PAWNIO_FILE%" "%ROOT%build\PawnIO_setup.exe" >nul 2>&1
+if not exist "%ROOT%build\PawnIO_setup.exe" (
+  echo BUILD FAILED: PawnIO_setup.exe missing
+  exit /b 1
+)
+
 echo.
 echo BUILD OK  -^>  build\RPMac.exe  +  build\smccore.exe
 echo Run as administrator. Keep inpout32.dll next to them.
 endlocal
 exit /b 0
+
+REM Exit code 0 when dist\PawnIO_setup.exe is exactly the pinned file. certutil prints the hash
+REM on its second line; older Windows puts spaces between the bytes, so they are removed.
+:pawnio_ok
+set "GOT="
+if not exist "%PAWNIO_FILE%" exit /b 1
+for /f "skip=1 delims=" %%H in ('certutil -hashfile "%PAWNIO_FILE%" SHA256 2^>nul') do if not defined GOT set "GOT=%%H"
+if not defined GOT exit /b 1
+set "GOT=%GOT: =%"
+if /i "%GOT%"=="%PAWNIO_SHA256%" exit /b 0
+exit /b 1

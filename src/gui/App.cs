@@ -334,6 +334,11 @@ namespace RPMac {
         TextBlock warnText;                // texto de la tarjeta "solo lectura": se refresca en cada reintento
         bool relaunching = false;          // ya se pidio relanzar tras recuperar el SMC
         const int REVALIDATE_MS = 10000;   // cada cuanto reintentar Validate() mientras estamos en solo lectura
+        volatile bool revalidateNow = false;   // re-validar en la siguiente vuelta, sin esperar REVALIDATE_MS
+        volatile bool pawnIoBusy = false;      // el instalador de PawnIO está corriendo: no re-validar aún
+        UIElement pawnIoOffer;             // oferta de instalar PawnIO en la tarjeta de solo lectura (T2)
+        TextBlock pawnIoInfo;
+        bool pawnIoInstalled = false;
         const double BAR_W = 505;   // ancho de la barra de RPM (columna de ventiladores)
         ComboBox trayModeCombo;     // "Show in tray" dropdown
         System.Drawing.Icon staticIcon;  // cached default "R" icon
@@ -446,6 +451,7 @@ namespace RPMac {
                 warn.Children.Add(new TextBlock { Text = I18n.T("⚠  Read-only mode"), FontSize = 14, FontWeight = FontWeights.Bold, Foreground = WARN });
                 warnText = new TextBlock { Text = Smc.SafetyReason, Foreground = TXT, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 0) };
                 warn.Children.Add(warnText);
+                if (Smc.IsT2Model && Smc.PawnIoMissing) { var offer = BuildPawnIoOffer(); if (offer != null) warn.Children.Add(offer); }
                 stack.Children.Add(Card(warn));
             }
 
@@ -474,6 +480,76 @@ namespace RPMac {
             StateChanged += delegate { if (WindowState == WindowState.Minimized) HideToTray(); };
             Closing += delegate (object s2, System.ComponentModel.CancelEventArgs e2) { if (!quitting) { e2.Cancel = true; HideToTray(); } };
             Closed += delegate { running = false; try { Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerChange; } catch { } };
+        }
+
+        // Un T2 sin PawnIO: ofrecer instalarlo con el instalador oficial que viene en el zip.
+        // Nunca se hace solo: instalar un driver de kernel lo decide el usuario con este botón.
+        // Al terminar, el bucle de refresco re-valida en su siguiente vuelta y, si el SMC ya
+        // contesta por MMIO, RPMac se relanza en modo T2 (igual que al recuperarse el SMC).
+        UIElement BuildPawnIoOffer() {
+            var col = new StackPanel { Margin = new Thickness(0, 12, 0, 0) };
+            pawnIoInfo = new TextBlock { Foreground = SUB, FontSize = 12, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 10) };
+            col.Children.Add(pawnIoInfo);
+            pawnIoOffer = col;
+
+            // Instalado pero sin dispositivo: el instalador se negaría ("previous installation found").
+            if (PawnIoSetup.IsInstalled()) {
+                pawnIoInfo.Text = I18n.T("PawnIO is installed but isn't running. Restart Windows; if RPMac still can't reach it, reinstall PawnIO from pawnio.eu.");
+                return col;
+            }
+            if (!PawnIoSetup.WindowsSupported()) {
+                pawnIoInfo.Text = I18n.T("This Mac has a T2 chip, and RPMac reaches it through PawnIO, which needs 64-bit Windows 10 1809 or later.");
+                return col;
+            }
+            if (!PawnIoSetup.Available) {   // alguien quitó PawnIO_setup.exe de la carpeta
+                pawnIoInfo.Text = I18n.T("Install PawnIO from pawnio.eu; RPMac connects to the T2 by itself as soon as it's running.");
+                return col;
+            }
+
+            pawnIoInfo.Text = I18n.T("This Mac has a T2 chip. RPMac reaches its SMC through PawnIO, a free signed driver by namazso (pawnio.eu) that isn't installed yet. This button runs PawnIO's official installer, which came with RPMac. PawnIO is provided as is, and you can remove it later from Settings > Apps.");
+            Border btn = null;
+            btn = Chip(I18n.T("Install PawnIO"), ACCENT, Brushes.White, delegate {
+                if (pawnIoBusy || pawnIoInstalled) return;
+                // Oculto, no atenuado: Chip() devuelve la opacidad a 1 al quitar el ratón, y un
+                // botón que parece activo pero no hace nada invita a pulsarlo otra vez.
+                pawnIoBusy = true; btn.Visibility = Visibility.Collapsed;
+                pawnIoInfo.Text = I18n.T("Installing PawnIO…");
+                new Thread(delegate () {
+                    string err;
+                    PawnIoSetup.Outcome r = PawnIoSetup.Run(out err);
+                    try {
+                        Dispatcher.BeginInvoke((Action)delegate {
+                            if (r == PawnIoSetup.Outcome.Installed) {
+                                pawnIoInstalled = true;
+                                pawnIoInfo.Text = I18n.T("PawnIO is installed. Connecting to the T2…");
+                                revalidateNow = true;
+                            } else if (r == PawnIoSetup.Outcome.InstalledRestart) {
+                                pawnIoInstalled = true;
+                                pawnIoInfo.Text = I18n.T("PawnIO is installed. Restart Windows to finish, then open RPMac again.");
+                            } else if (r == PawnIoSetup.Outcome.StillRunning) {
+                                // El botón no vuelve: un segundo instalador a la vez puede duplicar el
+                                // dispositivo. La re-validación sigue y lo recoge cuando aquel termine.
+                                pawnIoInfo.Text = err;
+                            } else {
+                                btn.Visibility = Visibility.Visible;
+                                pawnIoInfo.Text = I18n.T("PawnIO couldn't be installed: ") + err;
+                            }
+                            pawnIoBusy = false;
+                        });
+                    } catch { pawnIoBusy = false; }
+                }) { IsBackground = true }.Start();
+            });
+            btn.HorizontalAlignment = HorizontalAlignment.Left;
+            col.Children.Add(btn);
+            return col;
+        }
+
+        // Tras un reintento fallido: si PawnIO ya contesta, la oferta sobra (el texto de la
+        // tarjeta dice el motivo exacto); si se instaló y sigue sin aparecer, falta reiniciar.
+        void UpdatePawnIoOffer() {
+            if (pawnIoOffer == null) return;
+            if (!Smc.PawnIoMissing) { pawnIoOffer.Visibility = Visibility.Collapsed; return; }
+            if (pawnIoInstalled) pawnIoInfo.Text = I18n.T("PawnIO was installed but isn't running yet. Restart Windows, then open RPMac again.");
         }
 
         Border Card(UIElement content) {
@@ -2827,14 +2903,16 @@ namespace RPMac {
                         // dejo atascado, o aun estaba despertando): seguir sondeando en vez de
                         // quedarnos asi hasta reiniciar la app. Es la misma comprobacion de
                         // seguridad de siempre; solo se repite, y solo en un Mac (ver RevalidationAllowed).
-                        if (!Smc.WritesAllowed && Smc.RevalidationAllowed && !relaunching && sinceValidate.ElapsedMilliseconds >= REVALIDATE_MS) {
+                        if (!Smc.WritesAllowed && Smc.RevalidationAllowed && !relaunching && !pawnIoBusy
+                            && (revalidateNow || sinceValidate.ElapsedMilliseconds >= REVALIDATE_MS)) {
+                            revalidateNow = false;
                             sinceValidate.Restart();
                             bool ok = false;
                             try { ok = Smc.Validate(); } catch (Exception ex) { App.LogError("Revalidate", ex); }
                             if (ok) RelaunchAfterRecovery();
                             else {
                                 string why = Smc.SafetyReason;
-                                Dispatcher.BeginInvoke((Action)delegate { if (warnText != null) warnText.Text = why; });
+                                Dispatcher.BeginInvoke((Action)delegate { if (warnText != null) warnText.Text = why; UpdatePawnIoOffer(); });
                             }
                         }
                         // Un SMC ya validado que se atasco y volvio: puede haber perdido el modo
@@ -3296,6 +3374,162 @@ namespace RPMac {
         public static void SetFanCurve(int idx, string sensor, string points) {
             Fans[idx] = new string[] { "curve", "0", sensor, points };
             Save();
+        }
+    }
+
+    // Instala PawnIO con su instalador oficial, que viaja junto a RPMac (PawnIO_setup.exe 2.2.0,
+    // firmado por su autor y redistribuido sin modificar, como permite su licencia). Solo se ofrece
+    // en Macs con T2 que aún no lo tienen. RPMac nunca desinstala PawnIO: lo comparten otras apps
+    // (FanControl, LibreHardwareMonitor...).
+    static class PawnIoSetup {
+        internal const string FILE = "PawnIO_setup.exe";
+        // https://github.com/namazso/PawnIO.Setup/releases/tag/2.2.0 — cambiar los tres a la vez.
+        internal const string VERSION = "2.2.0";
+        const long EXPECTED_SIZE = 3410960;
+        const string EXPECTED_SHA256 = "1F519A22E47187F70A1379A48CA604981C4FCF694F4E65B734AAA74A9FBA3032";
+        // -silent: sin ventanas; desde 2.2.0 el código de salida es un error Win32 y 3010 significa
+        // "instalado, pero falta reiniciar".
+        const string ARGS = "-install -silent";
+        const int ERROR_NOT_SUPPORTED = 50;
+        const int ERROR_ALREADY_EXISTS = 183;
+        const int ERROR_SERVICE_MARKED_FOR_DELETE = 1072;
+        const int ERROR_SUCCESS_REBOOT_REQUIRED = 3010;
+
+        public enum Outcome { Installed, InstalledRestart, StillRunning, Failed }
+
+        static string SourcePath {
+            get {
+                return System.IO.Path.Combine(System.IO.Path.GetDirectoryName(
+                    System.Reflection.Assembly.GetExecutingAssembly().Location), FILE);
+            }
+        }
+
+        public static bool Available {
+            get { try { return System.IO.File.Exists(SourcePath); } catch { return false; } }
+        }
+
+        // ¿Hay ya un PawnIO instalado, funcione o no? Se mira lo mismo que mira su propio instalador:
+        // la entrada de desinstalación, en las dos vistas del registro (el instalador es de 64 bits y
+        // RPMac de 32). La clave del servicio NO cuenta: el desinstalador de PawnIO la deja atrás
+        // junto al driver en el DriverStore, y tomarla por "instalado" escondía el botón para siempre.
+        public static bool IsInstalled() {
+            try {
+                foreach (var view in new[] { Microsoft.Win32.RegistryView.Registry64, Microsoft.Win32.RegistryView.Registry32 })
+                    using (var hklm = Microsoft.Win32.RegistryKey.OpenBaseKey(Microsoft.Win32.RegistryHive.LocalMachine, view))
+                    using (var k = hklm.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\PawnIO"))
+                        if (k != null) return true;
+            } catch { }
+            return false;
+        }
+
+        // ¿Hay un instalador de PawnIO corriendo ahora mismo (de un intento anterior, o de otra app)?
+        // Dos a la vez pueden registrar dos dispositivos PawnIO.
+        static bool SetupRunning() {
+            try { return System.Diagnostics.Process.GetProcessesByName("PawnIO_setup").Length > 0; } catch { return false; }
+        }
+
+        // Carpetas de intentos que no terminaron (RPMac cerrado a mitad, o un instalador que tardó
+        // más que la espera): se borran a la hora, cuando seguro que ya no se están usando.
+        static void SweepOldFolders(string root) {
+            try {
+                foreach (string old in System.IO.Directory.GetDirectories(root, "RPMac-PawnIO-*"))
+                    try { if (System.IO.Directory.GetCreationTimeUtc(old) < DateTime.UtcNow.AddHours(-1)) System.IO.Directory.Delete(old, true); } catch { }
+            } catch { }
+        }
+
+        // PawnIO necesita Windows 10 1809 (build 17763) o posterior, de 64 bits.
+        public static bool WindowsSupported() {
+            if (!Environment.Is64BitOperatingSystem) return false;
+            try {
+                using (var k = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\Windows NT\CurrentVersion")) {
+                    object b = (k == null) ? null : k.GetValue("CurrentBuildNumber");
+                    int build;
+                    return b != null && int.TryParse(b.ToString(), out build) && build >= 17763;
+                }
+            } catch { return false; }
+        }
+
+        // Ejecuta el instalador y espera a que termine. 'message' explica el fallo, si lo hay.
+        public static Outcome Run(out string message) {
+            message = null;
+            string dir = null;
+            bool stillRunning = false;
+            try {
+                // Solo la copia exacta que se distribuyó: RPMac corre elevado, y la carpeta del zip
+                // suele ser escribible por el usuario.
+                byte[] data = System.IO.File.ReadAllBytes(SourcePath);
+                string hash;
+                using (var sha = new System.Security.Cryptography.SHA256CryptoServiceProvider())
+                    hash = BitConverter.ToString(sha.ComputeHash(data)).Replace("-", "");
+                if (data.Length != EXPECTED_SIZE || !string.Equals(hash, EXPECTED_SHA256, StringComparison.OrdinalIgnoreCase)) {
+                    message = I18n.T("{0} is not the official PawnIO {1} installer that came with RPMac. Install PawnIO from pawnio.eu instead.", FILE, VERSION);
+                    return Outcome.Failed;
+                }
+                if (SetupRunning()) {
+                    message = I18n.T("PawnIO's installer is already running. Wait for it to finish.");
+                    return Outcome.StillRunning;
+                }
+
+                // Y se ejecuta desde una carpeta que solo SYSTEM y los administradores pueden tocar: el
+                // instalador corre elevado y carga newdev.dll de su propia carpeta antes que de System32,
+                // así que no puede arrancar desde un sitio donde el usuario (o lo que corra como él)
+                // pueda dejar una DLL o cambiar el .exe entre la comprobación y la ejecución.
+                var acl = new System.Security.AccessControl.DirectorySecurity();
+                acl.SetAccessRuleProtection(true, false);
+                foreach (var sidType in new[] { System.Security.Principal.WellKnownSidType.LocalSystemSid,
+                                                System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid }) {
+                    acl.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                        new System.Security.Principal.SecurityIdentifier(sidType, null),
+                        System.Security.AccessControl.FileSystemRights.FullControl,
+                        System.Security.AccessControl.InheritanceFlags.ContainerInherit | System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+                        System.Security.AccessControl.PropagationFlags.None,
+                        System.Security.AccessControl.AccessControlType.Allow));
+                }
+                string root = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "Temp");
+                SweepOldFolders(root);
+                dir = System.IO.Path.Combine(root, "RPMac-PawnIO-" + Guid.NewGuid().ToString("N"));
+                System.IO.Directory.CreateDirectory(dir, acl);
+                string exe = System.IO.Path.Combine(dir, FILE);
+                System.IO.File.WriteAllBytes(exe, data);
+
+                // RPMac ya corre elevado, así que el instalador hereda los permisos sin otro aviso.
+                var psi = new System.Diagnostics.ProcessStartInfo(exe, ARGS) {
+                    UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = dir
+                };
+                int code;
+                using (var p = System.Diagnostics.Process.Start(psi)) {
+                    // Nunca se mata a medias: un driver a medio instalar es peor que esperar.
+                    if (!p.WaitForExit(5 * 60 * 1000)) {
+                        stillRunning = true;
+                        message = I18n.T("PawnIO's installer is still running. Wait for it to finish, then reopen RPMac.");
+                        return Outcome.StillRunning;
+                    }
+                    code = p.ExitCode;
+                }
+                switch (code) {
+                    case 0: return Outcome.Installed;
+                    case ERROR_SUCCESS_REBOOT_REQUIRED: return Outcome.InstalledRestart;
+                    case ERROR_SERVICE_MARKED_FOR_DELETE:
+                        message = I18n.T("an earlier PawnIO removal is still waiting for a restart. Restart Windows, then try again.");
+                        return Outcome.Failed;
+                    case ERROR_ALREADY_EXISTS:
+                        message = I18n.T("PawnIO is already installed. Restart Windows; if RPMac still can't reach it, reinstall PawnIO from pawnio.eu.");
+                        return Outcome.Failed;
+                    case ERROR_NOT_SUPPORTED:
+                        message = I18n.T("PawnIO needs 64-bit Windows 10 1809 or later.");
+                        return Outcome.Failed;
+                    default:
+                        message = I18n.T("PawnIO's installer failed (code {0}: {1}).", code, new System.ComponentModel.Win32Exception(code).Message);
+                        return Outcome.Failed;
+                }
+            } catch (Exception ex) {
+                App.LogError("PawnIoSetup", ex);
+                message = ex.Message;
+                return Outcome.Failed;
+            } finally {
+                // Si el instalador sigue corriendo, su carpeta se queda: se está ejecutando desde ella.
+                if (dir != null && !stillRunning) { try { System.IO.Directory.Delete(dir, true); } catch { } }
+            }
         }
     }
 

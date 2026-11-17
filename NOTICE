@@ -36,8 +36,21 @@ this project.
 
 AppleT2Smc  -  PawnIO kernel module RPMac uses to reach the SMC on T2 Macs.
   Source: src/pawnio/AppleT2Smc.p, Copyright (C) 2026 golirt1.
-  Licensed under the GNU Lesser General Public License, version 2.1 or later.
+  Licensed under the GNU Lesser General Public License, version 2.1 or later;
+  the license text ships next to it as COPYING.LGPL-2.1.
   AppleT2Smc.bin is the build signed by namazso and published in
-  PawnIO.Modules: https://github.com/namazso/PawnIO.Modules
-  It runs inside PawnIO (https://pawnio.eu), which is installed separately
-  and is not bundled with RPMac.
+  PawnIO.Modules 0.2.12: https://github.com/namazso/PawnIO.Modules
+  Its complete source is src/pawnio/AppleT2Smc.p in this repository plus the
+  include/ directory of PawnIO.Modules at tag 0.2.12.
+  It runs inside PawnIO (https://pawnio.eu), which is installed separately.
+
+PawnIO_setup.exe  -  the official PawnIO installer, version 2.2.0, by namazso.
+  Copyright (c) namazso <admin@namazso.eu>. All rights reserved.
+  Proprietary freeware, shipped next to RPMac UNMODIFIED, as its own notice
+  allows ("This installer can be redistributed unmodified."). It is a
+  separate program, not part of RPMac and not covered by RPMac's license.
+  RPMac only runs it, with the user's consent, on T2 Macs that don't have
+  PawnIO yet; RPMac never uninstalls PawnIO. Official releases:
+  https://github.com/namazso/PawnIO.Setup - the driver's source (GPL-2.0
+  with an exception for programs that only use its device interface) is at
+  https://github.com/namazso/PawnIO

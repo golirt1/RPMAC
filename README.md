@@ -80,30 +80,28 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 - Free and open source (GPL-2.0)
 
 ## Install
-No installer needed — it's a portable app. Although if you want to install it on your system, there is an installer for that.
-The benefit of the installer version is that it automatically launches with the system, adds `smccore.exe` to PATH, and also 
-is harder to accidentally delete.
+Two ways, same app. The installer is the easiest; the zip needs no setup and runs from its own folder.
 
-### Portable Instructions
-1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.11.0-windows.zip` (under **Assets**).
-2. **Unzip it** to any folder you like (e.g. your Desktop). Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe`, `inpout32.dll` and `AppleT2Smc.bin` **together in the same folder**.
-3. **T2 Macs only (2018-2020):** install [PawnIO](https://pawnio.eu) first — see [T2 Macs](#t2-macs-2018-2020) below.
-4. **Right-click `RPMac.exe` → "Run as administrator"** (administrator rights are required to access the Mac's hardware/SMC).
+### Installer (easiest)
+1. Go to the [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page and download `RPMac-v1.11.0-setup.exe` (under **Assets**).
+2. **Double-click it** and follow the steps. It installs RPMac, sets it to start with Windows (you can untick that), adds `smccore.exe` to the PATH, and **on T2 Macs (2018-2020) it also installs PawnIO**, the driver RPMac needs there.
+3. RPMac opens at the end. Set each fan to **Auto / Max / a custom RPM**. Temperatures update live.
+
+To uninstall, use *Settings → Apps → RPMac*. That also removes the small InpOut driver RPMac uses on Macs without a T2. PawnIO stays installed because other apps can use it too; remove it from *Settings → Apps* if you don't need it.
+
+### Portable (zip)
+1. From the same [**Releases**](https://github.com/golirt1/RPMAC/releases/latest) page, download `RPMac-v1.11.0-windows.zip`.
+2. **Unzip it** to any folder you like (e.g. your Desktop). Keep every file from the zip (`RPMac.exe`, `RPMac.exe.config`, `smccore.exe`, `inpout32.dll`, `AppleT2Smc.bin`, `PawnIO_setup.exe`) **together in the same folder**.
+3. **Right-click `RPMac.exe` → "Run as administrator"** (administrator rights are required to access the Mac's hardware/SMC).
+4. **T2 Macs only (2018-2020):** RPMac needs the free PawnIO driver and offers to install it for you with one click — see [T2 Macs](#t2-macs-2018-2020) below.
 5. Set each fan to **Auto / Max / a custom RPM**. Temperatures update live.
 
-### Installer instructions
-1. Go to the releases as documented above in the portable instructions.
-2. But instead, download the executable with `setup` in its name instead.
-3. Run it and follow the instructions; it should also automatically install the application to the system.
-4. If the app doesn't immediately start, open it up from the start menu.
-5. Use it in the same way as the portable version above.
-
 ### T2 Macs (2018-2020)
-On T2 Macs the T2 chip hides the SMC from the usual I/O ports, so RPMac reaches it through its own small kernel module for [PawnIO](https://pawnio.eu). That module (`AppleT2Smc.bin`, included in the zip) is signed and published in [PawnIO.Modules 0.2.12](https://github.com/namazso/PawnIO.Modules/releases/tag/0.2.12), so the regular PawnIO is all you need:
+On T2 Macs the T2 chip hides the SMC from the usual I/O ports, so RPMac reaches it through its own small kernel module for [PawnIO](https://pawnio.eu). That module (`AppleT2Smc.bin`) is signed and published in [PawnIO.Modules 0.2.12](https://github.com/namazso/PawnIO.Modules/releases/tag/0.2.12), so the regular PawnIO is all you need:
 
-1. Install PawnIO from [pawnio.eu](https://pawnio.eu).
-2. Keep `AppleT2Smc.bin` next to `RPMac.exe`.
-3. Run RPMac as administrator. Fans and temperatures show up just like on any other Mac.
+- **With the installer**, there is nothing to do: on a T2 Mac it installs PawnIO for you.
+- **With the zip**, run RPMac as administrator. If PawnIO isn't installed yet, the read-only card says so and shows an **Install PawnIO** button: it runs PawnIO's official installer (`PawnIO_setup.exe`, included in the zip and signed by its author), and RPMac connects to the T2 by itself as soon as it finishes.
+- Or install PawnIO yourself from [pawnio.eu](https://pawnio.eu) — either way, fans and temperatures then show up just like on any other Mac.
 
 No unrestricted edition, no test-signing mode and no specific PawnIO version are needed any more. If you set those up for the earlier test builds, the signed module loads there too; to go back to a normal setup, uninstall that PawnIO, install the regular one, run `bcdedit /set testsigning off` in an administrator terminal and reboot.
 
@@ -114,13 +112,13 @@ No unrestricted edition, no test-signing mode and no specific PawnIO version are
 >
 > None of this is a sign that something is wrong with the app — it's what happens to any unsigned utility that talks to hardware. Everything RPMac does is in this repository, and you can compile it yourself in a few seconds.
 
-To **uninstall**, just delete the folder. Settings live in `%APPDATA%\RPMac`; if you enabled "Start with Windows", turn that toggle off first (or delete the `RPMac` scheduled task).
+To **uninstall** the portable version, delete the folder. Settings live in `%APPDATA%\RPMac`; if you enabled "Start with Windows", turn that toggle off first (or delete the `RPMac` scheduled task). Two drivers can stay behind: the InpOut driver RPMac loads on Macs without a T2 (from an administrator terminal: `sc stop inpoutx64` and `sc delete inpoutx64`, then delete `C:\Windows\System32\drivers\inpoutx64.sys`), and PawnIO if you installed it (*Settings → Apps*).
 
 ## Compatibility
 | Hardware | Status |
 |---|---|
 | Intel Macs (up to 2017) on Boot Camp | Should work (confirmed on MacPro6,1, MacPro3,1, iMac17,1, Macmini3,1, Macmini7,1 and MacBookPro13,2) |
-| Intel Macs with T2 (2018-2020) | Works — install [PawnIO](https://pawnio.eu) first (confirmed on MacBookPro15,1 and MacBookPro16,1; see [T2 Macs](#t2-macs-2018-2020)) |
+| Intel Macs with T2 (2018-2020) | Works — needs [PawnIO](https://pawnio.eu), which the installer (or RPMac's **Install PawnIO** button) sets up for you. Confirmed on MacBookPro15,1 and MacBookPro16,1; see [T2 Macs](#t2-macs-2018-2020) |
 | Apple Silicon (M1+) | Not possible (no Boot Camp) |
 | Non-Apple PCs | Read-only (writes are blocked) |
 
@@ -227,7 +225,13 @@ The easiest way is the included **`build.bat`** (from the repo root):
 build.bat
 ```
 It compiles `RPMac.exe` and `smccore.exe` into `build\` and copies `inpout32.dll`,
-`RPMac.exe.config` and the signed `AppleT2Smc.bin` next to them.
+`RPMac.exe.config`, the signed `AppleT2Smc.bin` and `PawnIO_setup.exe` next to them. PawnIO's
+installer isn't kept in the repo: the first build downloads the pinned version (2.2.0) from
+[PawnIO's official releases](https://github.com/namazso/PawnIO.Setup/releases) into `dist\` and
+refuses any file whose SHA-256 doesn't match.
+
+To build the installer (`RPMac-vX.Y.Z-setup.exe`), install [Inno Setup](https://jrsoftware.org/isinfo.php)
+6.5 or newer, run `build.bat`, then `ISCC installer\rpmac-setup.iss`. The setup lands in `installer\Output\`.
 
 To compile `RPMac.exe` by hand instead, from the repo root:
 ```
@@ -256,7 +260,7 @@ signed by its author, so a module you compile yourself needs PawnIO's unrestrict
 ## License
 **GPL-2.0-only.** See `LICENSE`.
 
-RPMac's SMC code is derived from the Linux `applesmc` driver and smcFanControl — see `NOTICE` for credits. InpOut32 is bundled under the MIT license. The T2 kernel module (`src/pawnio/AppleT2Smc.p`) is LGPL-2.1-or-later, like the rest of PawnIO.Modules; `AppleT2Smc.bin` is the signed build published there.
+RPMac's SMC code is derived from the Linux `applesmc` driver and smcFanControl — see `NOTICE` for credits. InpOut32 is bundled under the MIT license. The T2 kernel module (`src/pawnio/AppleT2Smc.p`) is LGPL-2.1-or-later, like the rest of PawnIO.Modules; `AppleT2Smc.bin` is the signed build published there. `PawnIO_setup.exe` is PawnIO's official installer, © namazso, shipped unmodified as its own license allows; it is a separate program, not covered by RPMac's license.
 
 ## Credits
 - `applesmc.c` (Linux): Nicolas Boichat, Henrik Rydberg
