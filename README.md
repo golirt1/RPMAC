@@ -57,6 +57,7 @@ Designed as a lightweight, modern alternative to paid tools, RPMac includes **ha
 ## Features
 - Real-time fan RPM and temperature monitoring
 - Per-fan control: **Auto / Max / Manual RPM / temperature curve**
+- **T2 Macs (2018-2020) supported** with a signed driver — the installer, or a one-click button in the app, sets up PawnIO for you
 - **Graphical curve editor** — as many points as you want (double-click to add, right-click to remove, drag to shape), with a live dot showing exactly where the fan is running on the curve right now
 - **Curve on the hottest sensor** — instead of picking one sensor, let the fan follow whichever is hottest, so it ramps up when *either* the CPU or the GPU heats up
 - **Smooth fan changes** — ignores tiny temperature wobbles so a curve doesn't make the fan audibly hunt up and down
@@ -112,7 +113,7 @@ No unrestricted edition, no test-signing mode and no specific PawnIO version are
 >
 > None of this is a sign that something is wrong with the app — it's what happens to any unsigned utility that talks to hardware. Everything RPMac does is in this repository, and you can compile it yourself in a few seconds.
 
-To **uninstall** the portable version, delete the folder. Settings live in `%APPDATA%\RPMac`; if you enabled "Start with Windows", turn that toggle off first (or delete the `RPMac` scheduled task). Two drivers can stay behind: the InpOut driver RPMac loads on Macs without a T2 (from an administrator terminal: `sc stop inpoutx64` and `sc delete inpoutx64`, then delete `C:\Windows\System32\drivers\inpoutx64.sys`), and PawnIO if you installed it (*Settings → Apps*).
+To **uninstall** the portable version, delete the folder. Settings live in `%APPDATA%\RPMac`; if you enabled "Start with Windows", turn that toggle off first (or delete the `RPMac` scheduled task). Two drivers can stay behind: the InpOut driver RPMac installs on its first run (from an administrator terminal: `sc stop inpoutx64` and `sc delete inpoutx64`, then delete `C:\Windows\System32\drivers\inpoutx64.sys`), and PawnIO if you installed it (*Settings → Apps*).
 
 ## Compatibility
 | Hardware | Status |
