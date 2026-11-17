@@ -2,28 +2,36 @@
 
 **The other app capable of controlling fans on Intel Macs in Windows — for free.**
 
-### T2 Macs: just install PawnIO
+### T2 Macs work out of the box
 
-RPMac's T2 kernel module is now signed and published in [PawnIO.Modules 0.2.12](https://github.com/namazso/PawnIO.Modules/releases/tag/0.2.12) — thanks to @namazso for reviewing and signing it. No more unrestricted edition, test-signing mode or specific PawnIO version: on a 2018-2020 Mac, install the regular PawnIO from [pawnio.eu](https://pawnio.eu), keep `AppleT2Smc.bin` next to `RPMac.exe`, and run RPMac as administrator.
+RPMac's T2 kernel module is now signed and published in [PawnIO.Modules 0.2.12](https://github.com/namazso/PawnIO.Modules/releases/tag/0.2.12) — thanks to @namazso for reviewing and signing it. No more unrestricted edition, test-signing mode or specific PawnIO version, and you don't even have to install PawnIO yourself:
+
+- **The new installer** (`RPMac-v1.11.0-setup.exe`): double-click it and you're done. On a 2018-2020 Mac it installs PawnIO along with RPMac.
+- **The portable zip:** on a T2 Mac without PawnIO, RPMac shows an **Install PawnIO** button that runs PawnIO's official installer, which now comes in the zip. RPMac connects to the T2 by itself as soon as it finishes.
 
 If you set up the unrestricted edition for the earlier test builds, the signed module loads there too. To go back to a normal setup, uninstall that PawnIO, install the regular one, run `bcdedit /set testsigning off` and reboot.
+
+### New
+
+- **An installer.** One file, double-click, done: it installs RPMac, starts it with Windows (you can untick that), adds `smccore.exe` to the PATH, installs PawnIO on T2 Macs and opens RPMac at the end. Uninstall it from *Settings → Apps*, which also removes the InpOut driver RPMac uses on older Macs. Based on the script @matthewyang204 contributed.
+- **Apply a preset on startup.** On the Presets page, pick a preset for RPMac to apply every time it starts, or leave *None* to restore the last-used settings. Contributed by @VladislavEkimtcov.
 
 ### Fixed
 
 - **Fan control did nothing on T2 Macs since 1.10.0.** Temperatures and fan speeds read fine, but every Max / Manual / Curve change was refused and the status bar kept saying "SMC not responding". The SMC-recovery logic from 1.10.0 took the T2's silent legacy ports for a stuck SMC and never let go once the T2 module had taken over. Diagnosed by @Dirtyx686, who also posted the fix (#27); confirmed by @eSavior on a MacBook Pro 16-inch 2019.
 - **The raw sensor list showed "—" for every sensor RPMac has a name for**, such as the T2 CPU cores, GPU memory, battery and NVMe. They now show their name and their reading.
-
-### New
-
-- **Apply a preset on startup.** On the Presets page, pick a preset for RPMac to apply every time it starts, or leave *None* to restore the last-used settings. Contributed by @VladislavEkimtcov.
+- **Naming a second sensor of your own made the first one disappear** from curves, "Highest temp", the overlay, the tray and Emergency cooling until RPMac restarted.
+- **A preset saved while a fan's Curve tab was open but not yet applied** left that fan uncontrolled when the preset was used. It now follows the sensor shown in the tab.
+- **`smccore set <rpm>` for all fans skipped each fan's min/max**, and a negative value wrapped around to about 16,000 RPM. It now clamps like the per-fan form, and leaves a fan alone if it can't read its range.
+- **The tray temperature stopped at 199 °F.**
 
 ### Download
-Download `RPMac-v1.11.0-windows.zip` below, unzip it, and run **`RPMac.exe` as administrator**.
-Keep `RPMac.exe`, `RPMac.exe.config`, `smccore.exe`, `inpout32.dll` and `AppleT2Smc.bin` together in the same folder. On a T2 Mac, install [PawnIO](https://pawnio.eu) first.
+**Easiest:** download `RPMac-v1.11.0-setup.exe` below and double-click it.
+**Portable:** download `RPMac-v1.11.0-windows.zip`, unzip it, and run **`RPMac.exe` as administrator**. Keep all the files from the zip together in the same folder.
 
 > **If Windows blocks it:** RPMac isn't code-signed, so Windows doesn't recognise it yet. On **SmartScreen** choose *More info → Run anyway*; if **Smart App Control** blocks it the app just won't start, so either turn Smart App Control off in *Windows Security → App & browser control*, or build RPMac yourself from source. Some antivirus tools also flag the bundled **InpOut32** driver, which is what talks to the SMC — normal for any fan-control utility. The full source is in this repo.
 
-Read-only and safe on non-Apple hardware. License: GPL-2.0-only.
+Read-only and safe on non-Apple hardware. License: GPL-2.0-only. `PawnIO_setup.exe` is PawnIO's official installer by namazso, included unmodified.
 
 ---
 
