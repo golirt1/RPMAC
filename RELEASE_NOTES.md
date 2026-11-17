@@ -11,6 +11,10 @@ RPMac's T2 kernel module is now signed and published in [PawnIO.Modules 0.2.12](
 
 If you set up the unrestricted edition for the earlier test builds, the signed module loads there too. To go back to a normal setup, uninstall that PawnIO, install the regular one, run `bcdedit /set testsigning off` and reboot.
 
+### Thank you
+
+To **@namazso**, for PawnIO and for reviewing and signing the module. And to **@matthewyang204** (MacBook Pro 16-inch 2019) and **@Kinkaliyov** (MacBook Pro 15-inch 2018), who tested every T2 build on their own Macs, through months of unsigned drivers and test-signing mode. T2 support exists because of them.
+
 ### New
 
 - **An installer.** One file, double-click, done: it installs RPMac, starts it with Windows (you can untick that), adds `smccore.exe` to the PATH, installs PawnIO on T2 Macs and opens RPMac at the end. Uninstall it from *Settings → Apps*, which also removes the InpOut driver RPMac uses on older Macs. Based on the script @matthewyang204 contributed.

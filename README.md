@@ -268,6 +268,13 @@ RPMac's SMC code is derived from the Linux `applesmc` driver and smcFanControl �
 - InpOut32: Phillip Gibbons
 - PawnIO: namazso — who also reviewed and signed the T2 module
 
+### Thanks
+T2 support exists because of the people who tested it:
+- **namazso**, for PawnIO, and for reviewing and signing RPMac's T2 module so it works with the regular PawnIO.
+- **@matthewyang204** (MacBook Pro 16-inch 2019) and **@Kinkaliyov** (MacBook Pro 15-inch 2018), who ran every T2 test build on their own Macs, through months of unsigned drivers and test-signing mode, and reported back every time.
+- **@Dirtyx686** and **@eSavior**, who found and confirmed the fix that made fan control work again on T2 Macs in 1.11.0.
+- Everyone who opened an issue with a hardware report: that's how the compatibility list above was built.
+
 ## Disclaimer — no warranty
 
 RPMac is provided **"AS IS", without warranty of any kind**, express or implied, including but not limited to the warranties of merchantability and fitness for a particular purpose, as stated in the GNU GPL-2.0.
