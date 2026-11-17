@@ -118,17 +118,18 @@ To **uninstall** the portable version, delete the folder. Settings live in `%APP
 ## Compatibility
 | Hardware | Status |
 |---|---|
-| Intel Macs (up to 2017) on Boot Camp | Should work (confirmed on MacPro6,1, MacPro3,1, iMac17,1, Macmini3,1, Macmini7,1 and MacBookPro13,2) |
+| Intel Macs without a T2 chip | Works (confirmed on MacPro3,1, MacPro5,1, MacPro6,1, iMac17,1, iMac19,1, Macmini3,1, Macmini7,1, MacBookAir6,1, MacBookPro12,1 and MacBookPro13,2) |
 | Intel Macs with T2 (2018-2020) | Works — needs [PawnIO](https://pawnio.eu), which the installer (or RPMac's **Install PawnIO** button) sets up for you. Confirmed on MacBookPro15,1 and MacBookPro16,1; see [T2 Macs](#t2-macs-2018-2020) |
 | Apple Silicon (M1+) | Not possible (no Boot Camp) |
 | Non-Apple PCs | Read-only (writes are blocked) |
 
 ### Tested hardware
-RPMac has been verified on **eight machines**:
+RPMac has been verified on **twelve machines**:
 
 - **Mac Pro (Late 2013)** — model identifier `MacPro6,1`
   - Intel Xeon CPU, dual AMD FirePro GPUs, single centrifugal system fan
   - SMC fan/sensor values in `fpe2` format, I/O base `0x300`
+  - Also confirmed on Windows 11 by @I-Love-Potatoes
 - **Mac Pro (2008)** — model identifier `MacPro3,1`
   - Older Boot Camp in BIOS/CSM mode (where the Windows BIOS strings can be empty or lack "Apple") — RPMac still detects it via the SMC itself
 - **iMac (Retina 5K, 27-inch, Late 2015)** — model identifier `iMac17,1`
@@ -140,18 +141,30 @@ RPMac has been verified on **eight machines**:
 - **MacBook Pro (16-inch, 2019)** - model identifier `MacBookPro16,1`
   - Intel Core i9-9880H, AMD Radeon Pro 5500M, dual fan — running **Windows Server 2025 single-booted**
   - All of the features pretty much work @matthewyang204
+  - Also confirmed on Windows 11 by @eSavior: Max / Manual / Curve all work
 - **MacBook Pro (15-inch, 2018)** — model identifier `MacBookPro15,1`
   - Intel Core i9-8950HK, AMD Radeon Pro 560X, two fans — T2 chip present
   - Temperature sensors read correctly; fan control works in all four modes (Auto / Max / Manual / Curve), custom curve behaves properly under load. No SMC read failures, no fan stuck at minimum
   - Full run (sensor readout, mode switching, manual curve test) recorded on video and attached in the issue. Reported by @Kinkaliyov
+  - Also confirmed on Windows 11 by @Dirtyx686
 - **Mac mini (Late 2014)** — model identifier `Macmini7,1`
   - Intel Core i7-4578U, Intel Iris Graphics 5100, single fan — running **Windows 10 IoT Enterprise LTSC 2021**
   - Everything tried worked, including a custom temperature curve. Reported by @heni0xyz
 - **MacBook Pro (13-inch, Late 2016, Touch Bar)** — model identifier `MacBookPro13,2`
   - Intel Core i5-6267U, Intel Iris Graphics 550, two fans — running **Windows 10 Home**
   - Everything worked as intended, with no errors; the first confirmed MacBook without a T2 chip. Reported by @MasterWolff
+- **MacBook Pro (Retina, 13-inch, Early 2015)** — model identifier `MacBookPro12,1`
+  - Running **Windows 10 IoT LTSC**
+  - A temperature curve (60-85 °C on CPU PECI) keeps up under full CPU load since v1.9.0. Reported by @blissman
+- **MacBook Air (11-inch, 2013-2014)** — model identifier `MacBookAir6,1`
+  - RPMac contributor @VladislavEkimtcov built and tested the recovery from a stuck SMC (added in v1.10.0) on it
+- **Mac Pro (Mid 2012)** — model identifier `MacPro5,1`
+  - 2x Intel Xeon X5675, AMD Radeon RX 6600 XT — running **Windows 11 Pro 24H2** through **OpenCore Legacy Patcher** instead of Boot Camp
+  - "All features working well!", including presets for heavy 3D work. Reported by @LovelySophie-design
+- **iMac (Retina 5K, 27-inch, 2019)** — model identifier `iMac19,1`
+  - A 2019 iMac without a T2 chip; fan control works, down to the SMC's own minimum of 1,200 RPM. Reported by @xray-robot
 
-On all eight machines, reading sensors and controlling the fans (Auto / Max / custom RPM) work correctly.
+On all of them RPMac controls the fans; each entry says what its owner tested.
 
 ### Other Intel Macs (untested, but expected to work)
 Beyond the machines above, RPMac has **not** been tested on other Mac models yet. That said, it is built on the **standard Apple SMC interface that is common to virtually all Intel Macs**, and the core auto-detects the number of fans and each key's data format. So it *should* work on most Intel Macs in Boot Camp, with these caveats:
