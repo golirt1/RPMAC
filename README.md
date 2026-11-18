@@ -104,6 +104,8 @@ On T2 Macs the T2 chip hides the SMC from the usual I/O ports, so RPMac reaches 
 - **With the zip**, run RPMac as administrator. If PawnIO isn't installed yet, the read-only card says so and shows an **Install PawnIO** button: it runs PawnIO's official installer (`PawnIO_setup.exe`, included in the zip and signed by its author), and RPMac connects to the T2 by itself as soon as it finishes.
 - Or install PawnIO yourself from [pawnio.eu](https://pawnio.eu) — either way, fans and temperatures then show up just like on any other Mac.
 
+> **Not every T2 model works yet.** The driver has to know where each model keeps its SMC, and so far it knows the MacBook Pro 15-inch 2018 and 16-inch 2019. The **Mac Pro 2019** keeps it somewhere else, so RPMac stays read-only there (it shows `LoadBinary err 50`) until the driver is updated. **Have a T2 Mac? Please help in [issue #28](https://github.com/golirt1/RPMAC/issues/28)** — one screenshot is all it takes.
+
 No unrestricted edition, no test-signing mode and no specific PawnIO version are needed any more. If you set those up for the earlier test builds, the signed module loads there too; to go back to a normal setup, uninstall that PawnIO, install the regular one, run `bcdedit /set testsigning off` in an administrator terminal and reboot.
 
 > **If Windows blocks it:** RPMac is a small open-source app and isn't code-signed (a certificate costs a few hundred dollars a year), so Windows doesn't recognise it yet.
@@ -119,7 +121,7 @@ To **uninstall** the portable version, delete the folder. Settings live in `%APP
 | Hardware | Status |
 |---|---|
 | Intel Macs without a T2 chip | Works (confirmed on MacPro3,1, MacPro5,1, MacPro6,1, iMac17,1, iMac19,1, Macmini3,1, Macmini7,1, MacBookAir6,1, MacBookPro12,1 and MacBookPro13,2) |
-| Intel Macs with T2 (2018-2020) | Works — needs [PawnIO](https://pawnio.eu), which the installer (or RPMac's **Install PawnIO** button) sets up for you. Confirmed on MacBookPro15,1 and MacBookPro16,1; see [T2 Macs](#t2-macs-2018-2020) |
+| Intel Macs with T2 (2018-2020) | Works — needs [PawnIO](https://pawnio.eu), which the installer (or RPMac's **Install PawnIO** button) sets up for you. Confirmed on MacBookPro15,1 and MacBookPro16,1. **Not yet on the Mac Pro 2019** (MacPro7,1), and other T2 models are untested: [testers wanted](https://github.com/golirt1/RPMAC/issues/28) |
 | Apple Silicon (M1+) | Not possible (no Boot Camp) |
 | Non-Apple PCs | Read-only (writes are blocked) |
 
@@ -189,6 +191,9 @@ Please **open an issue** with:
 - Any error messages or odd readings (a screenshot is great)
 
 Even a quick "works fine on my iMac 2017" is hugely valuable. Thank you!
+
+### Looking for T2 Mac testers
+If you have a **T2 Mac** (MacBook Air 2018-2020, MacBook Pro 2018-2020, Mac mini 2018, iMac 27-inch 2020, iMac Pro or Mac Pro 2019), you can help RPMac support it. The driver needs each model's SMC address, and it has to be signed again every time it changes, so the plan is to collect every model first and update it in one go. Please comment in **[issue #28](https://github.com/golirt1/RPMAC/issues/28)** with your model identifier and a screenshot of *Device Manager → System devices → Apple SMC device → Resources*.
 
 ## Languages
 
